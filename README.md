@@ -11,6 +11,7 @@ A web-native, cross-reality game/studio hybrid: play inside worlds made from you
 ```bash
 pnpm i
 pnpm dev            # apps/web on http://localhost:5173
+pnpm dev:api        # the Worker on http://localhost:8787 (workerd, local R2/DO) — takes, cuts + share links, /perf
 pnpm test           # vitest
 pnpm test:e2e       # Playwright + SwiftShader screenshots
 pnpm build          # production bundle (Cloudflare Workers static assets)

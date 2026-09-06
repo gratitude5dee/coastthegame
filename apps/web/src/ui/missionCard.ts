@@ -24,6 +24,8 @@ export interface MissionCard {
   exportProgress(done: number, total: number): void;
   exportReady(url: string, name: string): void;
   exportFailed(message: string): void;
+  /** The cut is online: a share link next to the download. */
+  exportShared(url: string): void;
   /** Override the idle state line (e.g. the tutor's example command). Cleared by the next `brief()`. */
   setStatus(text: string): void;
   hide(): void;
@@ -330,6 +332,16 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
       if (!exportBtn) return;
       exportBtn.disabled = false;
       exportBtn.textContent = `Cut → MP4 (${message})`;
+    },
+    exportShared(url) {
+      const actions = verdictEl.querySelector('.mc-actions');
+      if (!actions || actions.querySelector('[data-act="share"]')) return;
+      const a = h('a', 'mc-btn', 'Share link');
+      a.dataset.act = 'share';
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      actions.append(a);
     },
     hide() {
       el.hidden = true;

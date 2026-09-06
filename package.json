@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @coast/web dev",
+    "dev:api": "pnpm --filter @coast/api dev",
     "build": "pnpm -r --filter './packages/**' --filter @coast/web build",
     "preview": "pnpm --filter @coast/web preview",
     "typecheck": "pnpm -r typecheck && pnpm typecheck:tools",

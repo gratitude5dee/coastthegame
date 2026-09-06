@@ -17,12 +17,13 @@ import { registerServiceWorker } from './pwa';
 const params = new URLSearchParams(location.search);
 export const seed = Number(params.get('seed') ?? '1'); // consumed by procedural systems from M2 (fog, NPC loiter)
 
-// Session id until auth lands (the Worker only requires a non-empty x-coast-session header).
+// Guest session id until sign-in lands (ID-*): the Worker keys takes, cuts and perf reports by it, so it lives in
+// localStorage — the same shelf across tabs and visits on this browser.
 const sessionId = (() => {
   try {
     const k = 'coast:session';
-    const v = sessionStorage.getItem(k) ?? crypto.randomUUID();
-    sessionStorage.setItem(k, v);
+    const v = localStorage.getItem(k) ?? sessionStorage.getItem(k) ?? crypto.randomUUID();
+    localStorage.setItem(k, v);
     return v;
   } catch {
     return crypto.randomUUID();

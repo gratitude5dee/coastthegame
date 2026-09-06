@@ -1037,6 +1037,7 @@ export class Game {
     );
     studio.onClip = (url) => this.showClip(url);
     studio.actorId = this.identity.id;
+    studio.sessionId = this.opts.sessionId;
     studio.propWriter = (id, pose) => {
       if (this.props?.grabbed?.spec.id === id) return; // the player is holding it: the live hand wins
       this.props?.setPose(id, pose.pos, pose.quat);

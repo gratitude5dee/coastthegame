@@ -13,5 +13,9 @@ export default defineConfig({
       '@dimforge/rapier3d-compat': path.resolve(__dirname, 'apps/web/node_modules/@dimforge/rapier3d-compat'),
     },
   },
-  test: { include: ['tests/unit/**/*.test.ts', 'packages/**/*.test.ts'] },
+  test: {
+    include: ['tests/unit/**/*.test.ts', 'packages/**/*.test.ts', 'tests/api/**/*.test.ts'],
+    // tests/api boots workerd (wrangler dev --local): ~20 s on a cold start.
+    testTimeout: 30_000,
+  },
 });

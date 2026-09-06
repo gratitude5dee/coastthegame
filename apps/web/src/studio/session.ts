@@ -30,6 +30,7 @@ import {
 import { createMissionCard, type MissionCard } from '../ui/missionCard';
 import { GhostActor, type ActorLook } from './ghosts';
 import { exportCut, type ExportResult, type ExportScene } from './exporter';
+import { uploadCut, uploadTake } from '../api';
 
 /** Gives a ghost body to a take's performer (the game knows the looks; tests get capsules). */
 export type GhostFactory = (actorId: string) => GhostActor;
@@ -110,6 +111,9 @@ export class StudioSession {
   exportScene: (() => Omit<ExportScene, 'seek'>) | null = null;
   lastCutUrl: string | null = null;
   exporting = false;
+  /** Guest session id (the Worker keys takes and cuts by it); empty = never upload. */
+  sessionId = '';
+  lastShare: string | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -314,6 +318,7 @@ export class StudioSession {
     if (verdict.stars > (this.stars.get(this.mission.id) ?? 0)) this.stars.set(this.mission.id, verdict.stars);
     performance.mark('coast:take-cut');
     void takeStore.save(take).catch(() => {});
+    if (this.sessionId) void uploadTake(this.sessionId, take); // ACT-4: the R2 shelf, when the API is around
 
     const clip = await this.stopMedia();
     if (this.lastClipUrl) URL.revokeObjectURL(this.lastClipUrl);
@@ -463,6 +468,13 @@ export class StudioSession {
       this.lastCutUrl = URL.createObjectURL(r.blob);
       this.card.exportReady(this.lastCutUrl, `coast-cut-${this.mission.id}.${r.ext}`);
       performance.mark('coast:cut-exported');
+      if (this.sessionId) {
+        const shared = await uploadCut(this.sessionId, `${this.mission.id}-${Date.now().toString(36)}`, r.blob, this.mission.title);
+        if (shared) {
+          this.lastShare = shared.url;
+          this.card.exportShared(shared.url);
+        }
+      }
     } catch (e) {
       console.warn('cut export failed', e);
       this.card.exportFailed(e instanceof Error ? e.message : String(e));

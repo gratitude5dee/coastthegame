@@ -15,7 +15,12 @@ function manualChunks(id: string): string | undefined {
 }
 
 export default defineConfig({
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    // The Worker (`pnpm dev:api` → wrangler dev on :8787) serves the API, share pages and the perf dashboard; in
+    // production the same Worker serves this app, so the client uses same-origin paths and this proxy is dev-only.
+    proxy: { '/api': 'http://localhost:8787', '/c/': 'http://localhost:8787', '/perf': 'http://localhost:8787' },
+  },
   // One three, ever: @iwer/devui (the ?xrsim=1 puppeteering panel, dev only) declares its own newer three, which
   // would load a second copy next to ours ("Multiple instances of Three.js" + instanceof checks failing across them).
   resolve: { dedupe: ['three'] },

@@ -7,9 +7,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 - [x] Monorepo scaffold, `pnpm dev/build/test/test:e2e` wiring, CI workflow
 - [x] Seed: three 0.180 + Spark 2.1 sample splat, tier detection + `budgets.ts` (PLT-1)
 - [x] Deterministic screenshot harness (`?scene&cam&t&shot`) with SwiftShader — 2 baseline PNGs committed under `tests/e2e/__screenshots__/`; extend to real cells in M2
-- [ ] Cloudflare deploy: Worker static assets + `pnpm deploy` + preview URL in PR (BE-4)
+- [~] Cloudflare deploy: Worker static assets + `pnpm deploy` + preview URL in PR (BE-4) — **the Worker is on Hono** (`workers/api/src/index.ts`, AF-7): sessions (`x-coast-session`), the per-session budget ledger in `SessionDO` (BE-2, gates the Realtime secret), takes to R2 (ACT-4), Coast Cuts to R2 with range playback + `/c/<token>` share pages (STU-3), perf reports + `/perf` dashboard (BE-3); `tests/api/worker.test.ts` runs it on workerd with emulated R2/DO; `pnpm dev:api` + the Vite proxy locally — the deploy itself needs `CLOUDFLARE_API_TOKEN`
 - [x] `/perf` in-app (`apps/web/src/perf.ts`: 600-frame ring, fps/frameMs p50/p95/max, QB-3/4/5 marks, `?perf=1` overlay + "Send report" → `/api/perf/report`) (BE-3)
-- [ ] `/perf` dashboard page reading `/api/perf/report` objects from R2 (BE-3)
+- [x] `/perf` dashboard page reading `/api/perf/report` objects from R2 (BE-3) — served by the Worker (`GET /perf`, `GET /api/perf/reports`)
 - [x] IWER wired: `?xrsim=1` installs an emulated Quest 3 (+ `@iwer/devui` puppeteering on the dev server); `tests/e2e/xr.spec.ts` drives it headless
 - [x] Service worker shell (`apps/web/public/sw.js` + `registerServiceWorker()` in `src/pwa.ts`): offline app shell, cache-first hashed assets/icons/samples, never `/api/*` or cross-origin (UX-2)
 - [ ] `scripts/setup.sh` validated in a fresh Codex environment (≤10 min)
