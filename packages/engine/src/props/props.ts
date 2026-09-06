@@ -45,7 +45,7 @@ export class PropSystem {
 
   constructor(
     private readonly physics: PhysicsWorld,
-    scene: THREE.Scene,
+    scene: THREE.Object3D,
   ) {
     scene.add(this.group);
     this.ghost = new THREE.Mesh(

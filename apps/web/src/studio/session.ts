@@ -83,7 +83,7 @@ export class StudioSession {
 
   constructor(
     parent: HTMLElement,
-    scene: THREE.Scene,
+    scene: THREE.Object3D,
     playerTemplate: THREE.Group,
     private readonly canvas: HTMLCanvasElement,
     private readonly cellVersion: string,

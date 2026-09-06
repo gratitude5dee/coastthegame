@@ -7,7 +7,9 @@ import { defineConfig } from 'vite';
  */
 function manualChunks(id: string): string | undefined {
   // pnpm resolves to node_modules/.pnpm/<pkg>@<ver>/node_modules/<pkg>/..., so match the trailing package dir.
-  if (/\/node_modules\/three\//.test(id)) return 'three'; // three + three/addons/* + three/examples/jsm/*
+  // Only the three core: addons (GLTFLoader for the app, OrbitControls & co. for the XR dev UI) stay with their importer,
+  // so an optional tool cannot fatten the chunk every player downloads.
+  if (/\/node_modules\/three\/build\//.test(id)) return 'three';
   if (/\/node_modules\/@sparkjsdev\/spark\//.test(id)) return 'spark';
   return undefined;
 }

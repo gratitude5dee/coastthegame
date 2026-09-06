@@ -32,6 +32,14 @@ export interface FrameInput {
   pointer: THREE.Vector2 | null;
   /** True while the pointer is locked (actor mode look). */
   pointerLocked: boolean;
+  /** World-space pointing ray (XR controller / hand / head) — preferred over `pointer` when set. */
+  pointerRay: THREE.Ray | null;
+  /** Snap-turn to apply to the XR frame this frame (radians, + = left). */
+  snapTurn: number;
+  /** Teleport state from the XR stick: aiming (show the marker) or go. */
+  teleport: 'idle' | 'aim' | 'go';
+  /** An XR session is presenting this frame. */
+  xrPresenting: boolean;
 }
 
 export function newFrameInput(): FrameInput {
@@ -57,6 +65,10 @@ export function newFrameInput(): FrameInput {
     sceneKey: null,
     pointer: null,
     pointerLocked: false,
+    pointerRay: null,
+    snapTurn: 0,
+    teleport: 'idle',
+    xrPresenting: false,
   };
 }
 
@@ -82,6 +94,10 @@ export function resetFrameInput(f: FrameInput) {
       false;
   f.sceneKey = null;
   f.sprint = false;
+  f.pointerRay = null;
+  f.snapTurn = 0;
+  f.teleport = 'idle';
+  f.xrPresenting = false;
 }
 
 export interface InputProvider {

@@ -10,6 +10,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 - [ ] Cloudflare deploy: Worker static assets + `pnpm deploy` + preview URL in PR (BE-4)
 - [x] `/perf` in-app (`apps/web/src/perf.ts`: 600-frame ring, fps/frameMs p50/p95/max, QB-3/4/5 marks, `?perf=1` overlay + "Send report" → `/api/perf/report`) (BE-3)
 - [ ] `/perf` dashboard page reading `/api/perf/report` objects from R2 (BE-3)
+- [x] IWER wired: `?xrsim=1` installs an emulated Quest 3 (+ `@iwer/devui` puppeteering on the dev server); `tests/e2e/xr.spec.ts` drives it headless
 - [x] Service worker shell (`apps/web/public/sw.js` + `registerServiceWorker()` in `src/pwa.ts`): offline app shell, cache-first hashed assets/icons/samples, never `/api/*` or cross-origin (UX-2)
 - [ ] `scripts/setup.sh` validated in a fresh Codex environment (≤10 min)
 - [x] ESLint/Prettier root config (`eslint.config.js`, `.prettierrc`; `pnpm lint` = eslint + prettier --check)
@@ -33,7 +34,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 
 ## M3 — Actor mode ×3 platforms (ACT/INP/PHY/CAM-4)
 
-- [x] KCC + intents: KB/M (pointer lock / drag), touch sticks + buttons, gamepad (XR sticks/teleport and footsteps pending)
+- [x] KCC + intents: KB/M (pointer lock / drag), touch sticks + buttons, gamepad, **WebXR controllers** (`apps/web/src/input/xrControllers.ts`: sticks, snap turn, teleport, buttons → intents) — footsteps pending
 - [~] Grab/throw primitive props + click-to-select → click-to-place put-that-there with ghost + undo (SDF tagging wall, VR hands pending)
 - [x] Lowrider raycast vehicle (`packages/engine/src/vehicles/lowrider.ts`: Rapier DynamicRayCastVehicleController, arcade tuning pinned by Node tests) + hydraulics (held switches I/J/K/L · d-pad · LIFT, hops with corner impulses) + enter/exit + chase/driver cams + touch pedals (PHY-3); beat grid `BeatClock` + metronome drive auto-hops (H) — placeholder body until the Tripo hero car (M4)
 - [x] M3.5 slice: missions 1–2 (`MISSIONS_V0`: Low & slow → Hop on the one, beatSync judged on manual hops), take clip via `captureStream(0)` + `requestFrame` (robust at low fps), Photographer hands out the next mission after a ≥1★ verdict
@@ -48,7 +49,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 
 ## M5 — Director & voice (CAM-_, DIR-_)
 
-- [ ] CameraRig modes + transitions; VR diorama producer mode (CAM-3)
+- [~] CameraRig modes + transitions ✓; **VR diorama producer mode (CAM-3)** ✓ world group at 1:12 on the table, physics paused (hand pick/place + write-back pending); XR rig moves `localFrame` (CAM-4) with snap turn + teleport
 - [ ] Realtime WebRTC client + ephemeral secrets + tool schema wiring + ghost preview/undo
 - [ ] Deixis resolver ≥40 unit tests; scripted voice suite (30 utterances, ≥27 pass)
 - [ ] Astra planner: mission → shot list; 12 curated missions

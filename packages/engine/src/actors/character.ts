@@ -12,6 +12,8 @@ export interface CharacterInput {
   move: THREE.Vector2;
   jump: boolean;
   sprint: boolean;
+  /** Extra world-space XZ displacement to attempt this step (m) — the headset user physically walking (CAM-4). */
+  offset?: THREE.Vector2 | null;
 }
 
 export interface CharacterOptions {
@@ -95,6 +97,10 @@ export class CharacterController {
     if (this.velocityY < -25) this.velocityY = -25;
 
     const desired = { x: move.x * speed * dt, y: this.velocityY * dt, z: move.y * speed * dt };
+    if (input.offset) {
+      desired.x += input.offset.x;
+      desired.z += input.offset.y;
+    }
     this.controller.computeColliderMovement(this.collider, desired, this.physics.R.QueryFilterFlags.EXCLUDE_SENSORS);
     const m = this.controller.computedMovement();
     this.grounded = this.controller.computedGrounded();
@@ -105,7 +111,7 @@ export class CharacterController {
     this.body.setNextKinematicTranslation({ x: this.curr.x, y: this.curr.y, z: this.curr.z });
 
     this.speed = Math.hypot(m.x, m.z) / dt;
-    if (this.speed > 0.2) this.yaw = Math.atan2(-m.x, -m.z); // three.js forward is -Z
+    if (this.speed > 0.2 && !input.offset) this.yaw = Math.atan2(-m.x, -m.z); // three.js forward is -Z (the head rules in XR)
   }
 
   /** Park the capsule while the player drives (PHY-3): its collider stops blocking the car; `teleport` on exit. */

@@ -5,7 +5,7 @@
  * render interpolation (STU-1).
  */
 import * as THREE from 'three';
-import { SparkRenderer, SplatMesh, SplatFileType } from '@sparkjsdev/spark';
+import { SparkRenderer, SparkXr, SplatMesh, SplatFileType } from '@sparkjsdev/spark';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   CameraRig,
@@ -14,10 +14,15 @@ import {
   PhysicsWorld,
   PropSystem,
   budgetsFor,
+  dioramaPlacement,
+  framePositionForHead,
   groundFromSplats,
   groundHeightAt,
   liftFromAxes,
   loadRapier,
+  snapTurnShift,
+  tablePoint,
+  yawOf,
   zeroVehicleInput,
   type Cell,
   type GroundGrid,
@@ -31,6 +36,7 @@ import { newFrameInput, resetFrameInput, type FrameInput, type InputProvider } f
 import { KeyboardMouseProvider } from './input/keyboardMouse';
 import { TouchProvider } from './input/touch';
 import { GamepadProvider } from './input/gamepad';
+import { XrControllerProvider } from './input/xrControllers';
 import { initPerf } from './perf';
 import { StudioSession } from './studio/session';
 import { Metronome } from './audio/metronome';
@@ -126,6 +132,9 @@ declare global {
     __coastPhysics?: boolean;
     __coastVehicle?: { driving: boolean; speed: number; pos: [number, number, number]; hops: number; wheels: number; autoHop: boolean };
     __coastGame?: unknown;
+    __coastXr?: boolean;
+    __coastXrSupported?: boolean;
+    __coastDiorama?: boolean;
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -139,6 +148,10 @@ declare global {
 
 export class Game {
   readonly scene = new THREE.Scene();
+  /** Everything that belongs to the block: splats, actors, props, the car, the billboard. Scaled as one in the diorama (CAM-3). */
+  readonly world = new THREE.Group();
+  /** XR: the camera's parent; the rig moves this, never the camera (CAM-4). */
+  readonly localFrame = new THREE.Group();
   readonly camera: THREE.PerspectiveCamera;
   readonly renderer: THREE.WebGLRenderer;
   readonly spark: SparkRenderer;
@@ -151,6 +164,18 @@ export class Game {
   private providers: InputProvider[] = [];
   private kbm: KeyboardMouseProvider;
   private touch: TouchProvider;
+  private xrInput: XrControllerProvider;
+  private xr: SparkXr | null = null;
+  private xrButton: HTMLButtonElement | null = null;
+  private inXr = false;
+  /** Yaw of the XR frame relative to the subject (snap turns accumulate here). */
+  private xrYaw = 0;
+  private diorama = false;
+  private readonly dioramaScale = 1 / 12;
+  private teleportMarker: THREE.Mesh | null = null;
+  private readonly headLocal = new THREE.Vector3();
+  private readonly headWorld = new THREE.Vector3();
+  private readonly headQuat = new THREE.Quaternion();
   private input: FrameInput = newFrameInput();
 
   private splat: SplatMesh | null = null;
@@ -222,7 +247,7 @@ export class Game {
       maxStdDev: this.budgets.maxStdDev,
       lodRenderScale: this.budgets.lodRenderScale,
     });
-    this.scene.add(this.spark);
+    this.scene.add(this.spark, this.world, this.localFrame);
     performance.mark('coast:boot');
     window.__coastGame = this; // harness / console handle (read-only by convention)
 
@@ -243,7 +268,7 @@ export class Game {
     nose.position.set(0, 1.45, -0.4);
     this.playerMesh.add(body, nose);
     this.playerMesh.visible = false;
-    this.scene.add(this.playerMesh);
+    this.world.add(this.playerMesh);
 
     const camParam = params.get('cam') ?? 'director';
     this.rig = new CameraRig(
@@ -254,7 +279,9 @@ export class Game {
 
     this.kbm = new KeyboardMouseProvider(this.renderer.domElement);
     this.touch = new TouchProvider(this.renderer.domElement);
-    this.providers = [this.kbm, this.touch, new GamepadProvider()];
+    this.xrInput = new XrControllerProvider(this.renderer, this.localFrame);
+    this.providers = [this.kbm, this.touch, new GamepadProvider(), this.xrInput];
+    if (platform.webxr && !this.isShot) this.setupXr();
     this.kbm.setPointerLockDesired(this.rig.mode === 'actor');
 
     this.crosshair = document.createElement('div');
@@ -326,7 +353,7 @@ export class Game {
 
   private clearWorld() {
     if (this.splat) {
-      this.scene.remove(this.splat);
+      this.world.remove(this.splat);
       this.splat.dispose();
       this.splat = null;
     }
@@ -344,27 +371,27 @@ export class Game {
     this.beat.stop();
     if (this.props) {
       for (const id of [...this.props.props.keys()]) this.props.remove(id);
-      this.scene.remove(this.props.group, this.props.ghost);
+      this.world.remove(this.props.group, this.props.ghost);
       this.props = null;
     }
     if (this.groundMesh) {
-      this.scene.remove(this.groundMesh);
+      this.world.remove(this.groundMesh);
       this.groundMesh.geometry.dispose();
       this.groundMesh = null;
     }
-    for (const m of this.colliderMeshes) this.scene.remove(m);
+    for (const m of this.colliderMeshes) this.world.remove(m);
     this.colliderMeshes = [];
     this.ground = null;
     this.physics?.dispose();
     this.physics = null;
     this.playerMesh.visible = false;
-    if (this.photographer) this.scene.remove(this.photographer);
+    if (this.photographer) this.world.remove(this.photographer);
     this.photographer = null;
-    if (this.billboard) this.scene.remove(this.billboard);
+    if (this.billboard) this.world.remove(this.billboard);
     this.billboard = null;
     if (this.studio) {
       this.studio.card.hide();
-      this.scene.remove(this.studio.ghost);
+      this.world.remove(this.studio.ghost);
       this.studio = null;
     }
     window.__coastPhysics = false;
@@ -408,7 +435,7 @@ export class Game {
     mesh.position.set(...def.position);
     mesh.scale.setScalar(def.scale);
     mesh.recolor.copy(TIME_PRESETS[this.timePreset]);
-    this.scene.add(mesh);
+    this.world.add(mesh);
     this.splat = mesh;
     this.placeCamera(def);
     this.perf.setCell(id);
@@ -447,7 +474,7 @@ export class Game {
     mesh.position.set(...def.position);
     mesh.scale.setScalar(def.scale);
     mesh.recolor.copy(TIME_PRESETS[this.timePreset]);
-    this.scene.add(mesh);
+    this.world.add(mesh);
     this.splat = mesh;
     this.placeCamera(def);
     this.perf.setCell(id);
@@ -496,7 +523,7 @@ export class Game {
             m.visible = false;
           }
         });
-        this.scene.add(gltf.scene);
+        this.world.add(gltf.scene);
         this.colliderMeshes.push(gltf.scene);
         colliderLoaded = true;
       } catch (e) {
@@ -523,7 +550,7 @@ export class Game {
         new THREE.MeshBasicMaterial({ color: 0x3fd0ff, wireframe: true, transparent: true, opacity: 0.35 }),
       );
       this.groundMesh.visible = this.debug;
-      this.scene.add(this.groundMesh);
+      this.world.add(this.groundMesh);
     }
 
     this.loadingScreen?.progress('physics', 0.7);
@@ -532,7 +559,7 @@ export class Game {
     this.character = new CharacterController(physics, { start: feet, yaw: this.rig.yaw });
 
     // A few props to grab, throw and "put there" (PHY-2). GLB props arrive with M4.
-    const props = new PropSystem(physics, this.scene);
+    const props = new PropSystem(physics, this.world);
     this.props = props;
     const f = this.rig.forwardXZ(new THREE.Vector3());
     const right = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0));
@@ -564,7 +591,7 @@ export class Game {
     carPos.y = (this.ground ? groundHeightAt(this.ground, carPos.x, carPos.z) : feet.y) + 1.0;
     this.vehicle = new Lowrider(physics, { position: carPos, yaw: this.rig.yaw });
     this.vehicleSpawn = { pos: carPos.clone(), yaw: this.rig.yaw };
-    this.scene.add(this.vehicle.group);
+    this.world.add(this.vehicle.group);
 
     this.setupStudio(feet, f, right);
 
@@ -579,12 +606,141 @@ export class Game {
     this.updateHint();
   }
 
+  // ── WebXR (Quest 3 / Vision Pro): SparkXr session, frame-based rig, diorama producer ───────────────────────────
+
+  private setupXr() {
+    const host = document.getElementById('enter') ?? document.body;
+    const button = document.createElement('button');
+    button.id = 'xr-button';
+    button.textContent = 'ENTER VR';
+    button.style.cssText =
+      'pointer-events:auto;padding:10px 16px;border-radius:8px;border:1px solid rgba(242,236,220,.35);background:rgba(11,10,16,.6);color:#f2ecdc;font:600 12px system-ui,sans-serif;letter-spacing:.08em;cursor:pointer';
+    host.appendChild(button);
+    this.xrButton = button;
+    this.xr = new SparkXr({
+      renderer: this.renderer,
+      element: button,
+      mode: 'vr',
+      referenceSpaceType: 'local-floor',
+      frameBufferScaleFactor: this.budgets.xrFramebufferScale,
+      enableHands: false, // hands (pinch = grab, index ray = point) land with the fog/paint touch slice
+      onReady: (supported) => {
+        button.hidden = !supported;
+        window.__coastXrSupported = supported;
+      },
+      onEnterXr: () => this.onEnterXr(),
+      onExitXr: () => this.onExitXr(),
+    });
+  }
+
+  private onEnterXr() {
+    this.inXr = true;
+    window.__coastXr = true;
+    if (this.xrButton) this.xrButton.textContent = 'EXIT VR';
+    // The rig now moves the frame; the headset owns the camera's local pose (three writes it every frame).
+    this.localFrame.add(this.camera);
+    this.camera.position.set(0, 0, 0);
+    this.camera.quaternion.identity();
+    this.xrYaw = this.rig.yaw; // keep facing the way the desktop view faced
+    if (this.driving) this.xrYaw -= this.vehicle?.yaw ?? 0;
+    if (this.rig.mode === 'director') this.rig.setMode('actor');
+    if (this.rig.mode === 'producer') this.setDiorama(true);
+    this.kbm.setPointerLockDesired(false);
+    performance.mark('coast:xr-enter');
+    this.updateHint();
+  }
+
+  private onExitXr() {
+    this.inXr = false;
+    window.__coastXr = false;
+    if (this.xrButton) this.xrButton.textContent = 'ENTER VR';
+    this.setDiorama(false);
+    // Hand the view direction back to the desktop rig, then detach the camera from the frame.
+    this.camera.getWorldQuaternion(this.headQuat);
+    this.rig.yaw = yawOf(this.headQuat);
+    this.rig.pitch = 0;
+    this.camera.removeFromParent();
+    this.camera.position.set(0, 0, 0);
+    if (this.teleportMarker) this.teleportMarker.visible = false;
+    this.kbm.setPointerLockDesired(this.rig.mode === 'actor');
+    this.updateHint();
+  }
+
+  /** Head pose in frame space (local) and world space, from the last rendered XR frame. */
+  private readHead() {
+    this.headLocal.copy(this.camera.position);
+    this.camera.getWorldPosition(this.headWorld);
+    this.camera.getWorldQuaternion(this.headQuat);
+  }
+
+  /**
+   * Producer in VR = diorama (CAM-3): the world group shrinks to 1:12 on a "table" in front of the standing user with
+   * the player's feet as the anchor; physics pauses while it is on. Positions are already 1:1 in the physics world, so
+   * leaving is just the identity transform (hand manipulation writes back later).
+   */
+  private setDiorama(on: boolean) {
+    if (on === this.diorama) return;
+    this.diorama = on;
+    if (on && this.character) {
+      this.readHead();
+      const feet = this.driving && this.vehicle ? this.carFeet(new THREE.Vector3()).clone() : this.character.feet(new THREE.Vector3());
+      const table = tablePoint(this.headWorld, yawOf(this.headQuat), 0.7, 0.55);
+      const place = dioramaPlacement(feet, table, this.dioramaScale);
+      this.world.position.copy(place.position);
+      this.world.scale.setScalar(place.scale);
+      this.playerMesh.visible = true;
+      performance.mark('coast:diorama-enter');
+    } else {
+      this.world.position.set(0, 0, 0);
+      this.world.scale.setScalar(1);
+    }
+    window.__coastDiorama = this.diorama;
+  }
+
+  private ensureTeleportMarker() {
+    if (this.teleportMarker) return this.teleportMarker;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.36, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffb54a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.visible = false;
+    this.world.add(ring);
+    this.teleportMarker = ring;
+    return ring;
+  }
+
+  /** XR snap turn: rotate the frame and shift the body so the head stays where it is (no world slide). */
+  private snapTurn(delta: number) {
+    const ch = this.character;
+    if (!ch || this.driving) {
+      this.xrYaw += delta;
+      return;
+    }
+    this.readHead();
+    const shift = snapTurnShift(this.xrYaw, delta, this.headLocal);
+    this.xrYaw += delta;
+    const feet = ch.feet(new THREE.Vector3());
+    ch.teleport(feet.add(new THREE.Vector3(shift.x, 0, shift.y)));
+    this.placeXrFrameNow();
+  }
+
+  /** Re-place the XR frame under the head right now (after a teleport/snap), so the next simulate sees no drift. */
+  private placeXrFrameNow() {
+    const car = this.driving ? this.vehicle : null;
+    const feet = car ? this.carFeet(this.tmpV) : this.character ? this.character.feet(this.tmpV) : null;
+    if (feet) this.updateXrFrame(feet, car ? car.yaw : 0);
+  }
+
   // ── Lowrider (PHY-3) ─────────────────────────────────────────────────────────────────────────────────────────
 
   private setDriving(v: boolean) {
     if (v === this.driving) return;
     this.driving = v;
     this.touch.setDriving(v);
+    this.xrInput.driving = v;
+    // In XR the frame yaw is relative to the subject: re-base so the user keeps facing the same way.
+    if (this.inXr && this.vehicle) this.xrYaw += v ? -this.vehicle.yaw : this.vehicle.yaw;
   }
 
   private enterVehicle() {
@@ -657,7 +813,7 @@ export class Game {
     npcPos.y = this.ground ? groundHeightAt(this.ground, npcPos.x, npcPos.z) : feet.y;
     npc.position.copy(npcPos);
     npc.lookAt(feet.x, npcPos.y, feet.z);
-    this.scene.add(npc);
+    this.world.add(npc);
     this.photographer = npc;
 
     // Billboard: "your cut plays here" until a take exists, then the recorded clip (VideoTexture).
@@ -690,13 +846,13 @@ export class Game {
     );
     frame.position.set(0, 0, -0.05);
     bb.add(frame);
-    this.scene.add(bb);
+    this.world.add(bb);
     this.billboard = bb;
 
     const missionParam = Number(this.opts.params.get('mission') ?? '0');
     const studio = new StudioSession(
       document.body,
-      this.scene,
+      this.world,
       this.playerMesh,
       this.renderer.domElement,
       this.cellId ?? this.currentSceneId,
@@ -787,10 +943,33 @@ export class Game {
       this.splat?.recolor.copy(TIME_PRESETS[this.timePreset]);
     }
     if (i.modeCycle) {
-      this.rig.cycle(RIG_ORDER);
-      this.kbm.setPointerLockDesired(this.rig.mode === 'actor');
+      if (this.inXr) {
+        // VR has two perspectives: actor (life-size) and producer (the diorama). Director is a desktop/phone view.
+        this.rig.setMode(this.rig.mode === 'producer' ? 'actor' : 'producer');
+        this.setDiorama(this.rig.mode === 'producer');
+      } else {
+        this.rig.cycle(RIG_ORDER);
+        this.kbm.setPointerLockDesired(this.rig.mode === 'actor');
+      }
       this.props?.select(null);
       this.updateHint();
+    }
+    if (i.snapTurn && this.inXr && !this.diorama) this.snapTurn(i.snapTurn);
+    if (this.inXr && !this.diorama && !this.driving && this.character) {
+      const marker = this.ensureTeleportMarker();
+      if (i.teleport === 'aim' || i.teleport === 'go') {
+        const ray = this.pointerRay();
+        const hit = ray ? this.groundHit(ray) : null;
+        if (hit && i.teleport === 'aim') {
+          marker.visible = true;
+          marker.position.copy(hit).add(this.tmpV2.set(0, 0.03, 0));
+        } else if (hit) {
+          marker.visible = false;
+          this.character.teleport(hit.add(this.tmpV2.set(0, 0.1, 0)));
+          this.placeXrFrameNow(); // before simulate, or the walk-offset logic would pull the body back
+          performance.mark('coast:teleport');
+        } else marker.visible = false;
+      } else marker.visible = false;
     }
     if (i.debugToggle) {
       this.debug = !this.debug;
@@ -888,12 +1067,34 @@ export class Game {
     if (!physics || !ch || !this.physicsReady) return;
     const i = this.input;
     const driving = this.driving && !!this.vehicle;
+    if (this.diorama) return; // the world is on the table: physics paused (CAM-3)
+    if (this.inXr) {
+      // The head rules: movement is relative to where the user looks; the capsule faces the same way.
+      this.readHead();
+      this.rig.yaw = yawOf(this.headQuat);
+      if (!driving) ch.yaw = this.rig.yaw;
+    }
     // Local move → world move relative to the camera yaw.
     const yaw = this.rig.yaw;
     const mx = THREE.MathUtils.clamp(i.move.x, -1, 1);
     const my = THREE.MathUtils.clamp(i.move.y, -1, 1);
     this.tmpMove.set(mx * Math.cos(yaw) - my * Math.sin(yaw), -mx * Math.sin(yaw) - my * Math.cos(yaw));
-    const charInput = { move: this.tmpMove, jump: i.jump && !driving, sprint: i.sprint };
+    const charInput: Parameters<CharacterController['step']>[1] = {
+      move: this.tmpMove,
+      jump: i.jump && !driving,
+      sprint: i.sprint,
+      offset: null,
+    };
+    if (this.inXr && !driving) {
+      // Physical walking: the head drifted from the frame origin → the capsule tries to follow (the frame is put back
+      // under the head in updateCamera, so a blocked capsule pushes the world instead of leaving the body behind).
+      // Where the frame would have to be for the head to stand over the feet, vs where it is: the difference is how
+      // far the user physically walked since the frame was last placed.
+      const wanted = framePositionForHead(ch.feet(this.tmpV), this.xrYaw, this.headLocal, this.tmpV2);
+      const dx = this.localFrame.position.x - wanted.x;
+      const dz = this.localFrame.position.z - wanted.z;
+      if (Math.hypot(dx, dz) > 0.005) charInput.offset = new THREE.Vector2(dx, dz);
+    }
 
     // Lowrider input: the stick drives when you are in it; the switchbox works from outside too (it is a show car).
     const vi = this.vehicleInput;
@@ -916,10 +1117,11 @@ export class Game {
       vi.hop = null; // edge consumed by the first sub-step
       if (!driving) ch.step(fixedDt, charInput);
       charInput.jump = false;
+      charInput.offset = null; // physical displacement applies once per frame
       if (this.props?.grabbed) this.props.updateGrabbed(this.holdPoint());
     });
     window.__coastSteps = physics.stepCount;
-    if (this.rig.mode === 'actor' && !driving) ch.yaw = this.rig.yaw;
+    if (this.rig.mode === 'actor' && !driving && !this.inXr) ch.yaw = this.rig.yaw;
     this.props?.sync(physics.alpha);
     this.vehicle?.sync(physics.alpha);
     if (this.vehicle) {
@@ -944,6 +1146,17 @@ export class Game {
     const car = this.driving ? this.vehicle : null;
     const feet = car ? this.carFeet(this.tmpV) : ch ? ch.feet(this.tmpV) : this.tmpV.set(...(this.sceneDef.spawn ?? [0, 0, 0]));
     const look = { yaw: this.input.look.x, pitch: this.input.look.y, zoom: this.input.zoom };
+    if (this.inXr) {
+      this.updateXrFrame(feet, car ? car.yaw : 0);
+      if (ch) {
+        this.playerMesh.visible = this.diorama;
+        this.playerMesh.position.copy(feet);
+        this.playerMesh.rotation.y = car ? car.yaw : ch.yaw;
+        this.updateStudio(feet);
+      }
+      this.crosshair.style.display = 'none';
+      return;
+    }
     if (car && ch) {
       // Driving: the rig follows the car; in first person the look turns with the car (free look on top).
       const carYaw = car.yaw;
@@ -976,6 +1189,22 @@ export class Game {
     this.crosshair.style.display = this.rig.mode === 'actor' && this.input.pointerLocked ? 'block' : 'none';
   }
 
+  /**
+   * XR (CAM-4): place the frame so the head stands over the subject's feet — the character when walking, the driver's
+   * seat when driving — with the accumulated snap-turn yaw on top. In the diorama the frame stays put and the world moves.
+   */
+  private updateXrFrame(feet: THREE.Vector3, subjectYaw: number) {
+    if (this.diorama) return;
+    this.readHead();
+    const yaw = subjectYaw + this.xrYaw;
+    this.localFrame.rotation.y = yaw;
+    if (this.driving) {
+      framePositionForHead(feet, yaw, this.headLocal, this.localFrame.position);
+      this.localFrame.position.y = feet.y - 0.6; // a standing user's eye lands in the cabin
+      this.lastCarYaw = subjectYaw;
+    } else framePositionForHead(feet, yaw, this.headLocal, this.localFrame.position);
+  }
+
   /** Ghost preview while a prop is selected (DIR-3), following the pointer or the crosshair. */
   private updatePointer() {
     const props = this.props;
@@ -987,6 +1216,7 @@ export class Game {
   // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
   private pointerRay(): THREE.Ray | null {
+    if (this.input.pointerRay) return this.input.pointerRay;
     const ndc = this.input.pointerLocked || this.input.pointer === null ? new THREE.Vector2(0, 0) : this.input.pointer;
     this.raycaster.setFromCamera(ndc, this.camera);
     return this.raycaster.ray.clone();
@@ -1063,9 +1293,8 @@ export class Game {
     const ch = this.character!;
     const car = this.driving ? this.vehicle : null;
     const feet = car ? this.carFeet(new THREE.Vector3()).clone() : ch.feet(new THREE.Vector3());
-    const camH = this.ground
-      ? this.camera.position.y - groundHeightAt(this.ground, this.camera.position.x, this.camera.position.z)
-      : this.camera.position.y - feet.y;
+    const camPos = this.camera.getWorldPosition(new THREE.Vector3());
+    const camH = this.ground ? camPos.y - groundHeightAt(this.ground, camPos.x, camPos.z) : camPos.y - feet.y;
     const subject = this.studio?.subjectId ?? 'crate_1';
     return {
       nowMs: performance.now(),
@@ -1101,6 +1330,10 @@ export class Game {
     const p = this.props;
     const beat = this.autoHop ? ' · H beat off' : ' · H hop on the beat';
     if (!this.physicsReady) this.hint = 'loading physics…';
+    else if (this.inXr)
+      this.hint = this.diorama
+        ? 'diorama: B back to life-size'
+        : 'left stick move · right stick snap / push to teleport · A jump · X grab / car · Y action · B diorama';
     else if (this.driving)
       this.hint =
         (this.studio?.state === 'recording' ? '● recording — Enter to cut · ' : '') +
