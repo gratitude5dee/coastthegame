@@ -94,6 +94,43 @@ export class PhysicsWorld {
     return { collider, geometry };
   }
 
+  /**
+   * Invisible walls around a ground grid (PHY-1 sample worlds / cells without a collider): four static cuboids rising
+   * `height` m above the highest ground vertex, so the car and the character stay on the block. Cell graphs replace
+   * this with streaming transitions (W-3).
+   */
+  addFence(grid: GroundGrid, height = 4): RAPIER_NS.Collider[] {
+    let top = -Infinity;
+    let bottom = Infinity;
+    for (let i = 0; i < grid.heights.length; i++) {
+      const h = grid.heights[i]!;
+      if (h > top) top = h;
+      if (h < bottom) bottom = h;
+    }
+    if (!Number.isFinite(top)) top = bottom = 0;
+    const minX = grid.minX;
+    const minZ = grid.minZ;
+    const maxX = grid.minX + (grid.cols - 1) * grid.cellSize;
+    const maxZ = grid.minZ + (grid.rows - 1) * grid.cellSize;
+    const cx = (minX + maxX) / 2;
+    const cz = (minZ + maxZ) / 2;
+    const hx = (maxX - minX) / 2;
+    const hz = (maxZ - minZ) / 2;
+    const hy = (top + height - bottom) / 2 + 1;
+    const cy = (top + height + bottom) / 2 - 1;
+    const t = 0.25; // wall half thickness
+    const body = this.world.createRigidBody(this.R.RigidBodyDesc.fixed());
+    const walls: [number, number, number, number, number][] = [
+      [cx, minZ - t, hx + t, hy, t],
+      [cx, maxZ + t, hx + t, hy, t],
+      [minX - t, cz, t, hy, hz + t],
+      [maxX + t, cz, t, hy, hz + t],
+    ];
+    return walls.map(([x, z, ex, ey, ez]) =>
+      this.world.createCollider(this.R.ColliderDesc.cuboid(ex, ey, ez).setTranslation(x, cy, z).setFriction(0.2), body),
+    );
+  }
+
   dispose() {
     this.world.free();
   }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as THREE from 'three';
-import { loadRapier, PhysicsWorld, type Rapier } from '../../packages/engine/src/physics/world';
+import { loadRapier, PhysicsWorld, type GroundGrid, type Rapier } from '../../packages/engine/src/physics/world';
 import { Lowrider, liftFromAxes, zeroVehicleInput, type VehicleInput } from '../../packages/engine/src/vehicles/lowrider';
 
 /**
@@ -153,5 +153,25 @@ describe('Lowrider (PHY-3)', () => {
     expect(e.x).toBeLessThan(p.x - car.tuning.halfExtents[0]);
     expect(Math.abs(e.z - p.z)).toBeLessThan(0.6);
     expect(e.y).toBeLessThan(p.y);
+  });
+
+  it('stays on the block: the ground-grid fence stops a full-throttle run at the edge', () => {
+    const physics = new PhysicsWorld(R);
+    const cols = 41; // 30 m × 30 m flat grid centred on the origin
+    const grid: GroundGrid = { heights: new Float32Array(cols * cols), cols, rows: cols, minX: -15, minZ: -15, cellSize: 0.75 };
+    physics.addGroundGrid(grid);
+    expect(physics.addFence(grid, 4)).toHaveLength(4);
+    const car = new Lowrider(physics, { position: new THREE.Vector3(0, 1.2, 0), visuals: false });
+    const inp = { ...zeroVehicleInput(), throttle: 1 };
+    for (let i = 0; i < 6 * 60; i++) {
+      car.beforeStep();
+      car.step(physics.fixedDt, inp);
+      physics.world.step();
+    }
+    const t = car.body.translation();
+    expect(t.z).toBeGreaterThan(-15 - 0.5); // pinned against the −Z wall, not through it
+    expect(t.z).toBeLessThan(-9);
+    expect(t.y).toBeGreaterThan(0); // did not fall off
+    expect(Math.abs(car.speed)).toBeLessThan(1);
   });
 });

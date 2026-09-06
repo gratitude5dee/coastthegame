@@ -497,8 +497,9 @@ export class Game {
     const spawnXZ = new THREE.Vector3(...(def.spawn ?? [0, 0, 0]));
     if (!colliderLoaded) {
       // Ground from the splats themselves (PHY-1 fallback). Centre the grid on the spawn.
-      this.ground = groundFromSplats(this.splat, { center: spawnXZ, halfExtent: 24, cellSize: 0.75 });
+      this.ground = groundFromSplats(this.splat, { center: spawnXZ, halfExtent: 40, cellSize: 0.75 });
       const { geometry } = physics.addGroundGrid(this.ground);
+      physics.addFence(this.ground, 4); // the block ends where the ground grid ends — nobody drives off the world
       this.groundMesh = new THREE.Mesh(
         geometry,
         new THREE.MeshBasicMaterial({ color: 0x3fd0ff, wireframe: true, transparent: true, opacity: 0.35 }),
@@ -593,6 +594,18 @@ export class Game {
     ch.yaw = car.yaw;
     this.setDriving(false);
     this.updateHint();
+  }
+
+  /** R / fell off the world: everyone back to the spawn pose (player out of the car, car on its marks). */
+  private respawn() {
+    this.exitVehicle();
+    this.placeCamera(this.sceneDef);
+    if (this.character) {
+      const s = this.sceneDef.spawn ?? [0, 0, 0];
+      const y = this.ground ? groundHeightAt(this.ground, s[0], s[2]) : s[1];
+      this.character.teleport(new THREE.Vector3(s[0], y + 0.3, s[2]));
+    }
+    if (this.vehicle && this.vehicleSpawn) this.vehicle.teleport(this.vehicleSpawn.pos, this.vehicleSpawn.yaw);
   }
 
   /** Which corners a manual hop lifts: the held switch decides (front by default, Shift = all four). */
@@ -766,16 +779,7 @@ export class Game {
       if (this.groundMesh) this.groundMesh.visible = this.debug;
       for (const m of this.colliderMeshes) m.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).visible = this.debug) : null));
     }
-    if (i.resetEdge) {
-      this.exitVehicle();
-      this.placeCamera(this.sceneDef);
-      if (this.character) {
-        const s = this.sceneDef.spawn ?? [0, 0, 0];
-        const y = this.ground ? groundHeightAt(this.ground, s[0], s[2]) : s[1];
-        this.character.teleport(new THREE.Vector3(s[0], y + 0.3, s[2]));
-      }
-      if (this.vehicle && this.vehicleSpawn) this.vehicle.teleport(this.vehicleSpawn.pos, this.vehicleSpawn.yaw);
-    }
+    if (i.resetEdge) this.respawn();
     if (i.undo) this.props?.undo();
     if (i.cancel) this.props?.select(null);
     if (i.beatToggle) {
@@ -911,8 +915,10 @@ export class Game {
         autoHop: this.autoHop,
       };
     }
-    // Fell through the world? Respawn on the ground.
-    if ((driving ? this.vehicle!.position(this.tmpV) : ch.feet(this.tmpV)).y < -40) i.resetEdge = true;
+    // Fell through the world? Respawn on the ground (directly — an input edge set here would be cleared before it is read).
+    const fell =
+      (driving ? this.vehicle!.position(this.tmpV) : ch.feet(this.tmpV)).y < -40 || (this.vehicle?.position(this.tmpV2).y ?? 0) < -40;
+    if (fell) this.respawn();
   }
 
   private updateCamera(dt: number) {
