@@ -22,6 +22,8 @@ export interface FrameInput {
   timeCycle: boolean; // edge
   debugToggle: boolean; // edge
   resetEdge: boolean; // edge
+  action: boolean; // edge — Enter / ACTION button: roll or cut a take
+  playback: boolean; // edge — P: replay the last take
   sceneKey: number | null; // 1-based scene slot
   /** Normalised device coords of the pointer (-1..1), when known. */
   pointer: THREE.Vector2 | null;
@@ -45,6 +47,8 @@ export function newFrameInput(): FrameInput {
     timeCycle: false,
     debugToggle: false,
     resetEdge: false,
+    action: false,
+    playback: false,
     sceneKey: null,
     pointer: null,
     pointerLocked: false,
@@ -56,7 +60,19 @@ export function resetFrameInput(f: FrameInput) {
   f.move.set(0, 0);
   f.look.set(0, 0);
   f.zoom = 1;
-  f.jump = f.interact = f.throwEdge = f.select = f.cancel = f.undo = f.modeCycle = f.timeCycle = f.debugToggle = f.resetEdge = false;
+  f.jump =
+    f.interact =
+    f.throwEdge =
+    f.select =
+    f.cancel =
+    f.undo =
+    f.modeCycle =
+    f.timeCycle =
+    f.debugToggle =
+    f.resetEdge =
+    f.action =
+    f.playback =
+      false;
   f.sceneKey = null;
   f.sprint = false;
 }

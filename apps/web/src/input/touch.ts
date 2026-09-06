@@ -31,13 +31,14 @@ export class TouchProvider implements InputProvider {
         <div id="stick-knob" style="position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,181,74,.6)"></div>
       </div>
       <div style="position:absolute;right:20px;bottom:100px;display:flex;flex-direction:column;gap:12px;pointer-events:auto">
-        ${btn('jump', 'JUMP')}${btn('grab', 'GRAB')}${btn('mode', 'MODE')}
+        ${btn('action', 'ACTION')}${btn('jump', 'JUMP')}${btn('grab', 'GRAB')}${btn('mode', 'MODE')}
       </div>`;
     document.body.appendChild(this.root);
     this.stickBase = this.root.querySelector('#stick-base')!;
     this.stickKnob = this.root.querySelector('#stick-knob')!;
     if (this.isTouchDevice) this.root.style.display = 'block';
     for (const [id, edge] of [
+      ['action', 'action'],
       ['jump', 'jump'],
       ['grab', 'interact'],
       ['mode', 'modeCycle'],
@@ -70,6 +71,7 @@ export class TouchProvider implements InputProvider {
     if (this.edges.has('jump')) out.jump = true;
     if (this.edges.has('interact')) out.interact = true;
     if (this.edges.has('modeCycle')) out.modeCycle = true;
+    if (this.edges.has('action')) out.action = true;
     this.edges.clear();
   }
 

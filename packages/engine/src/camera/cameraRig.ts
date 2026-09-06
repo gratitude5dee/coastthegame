@@ -97,7 +97,7 @@ export class CameraRig {
 
     this.yaw -= look.yaw;
     const maxPitch = this.mode === 'actor' ? 1.45 : 1.2;
-    const minPitch = this.mode === 'actor' ? -1.45 : -0.15;
+    const minPitch = this.mode === 'actor' ? -1.45 : -0.55; // director/producer may dip low for low-angle shots (the game clamps above ground)
     this.pitch = THREE.MathUtils.clamp(this.pitch - look.pitch, minPitch, maxPitch);
     if (look.zoom !== 1) this.zoom = THREE.MathUtils.clamp(this.zoom * look.zoom, 0.4, 3);
 

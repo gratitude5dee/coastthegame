@@ -48,7 +48,10 @@ export class PropSystem {
     scene: THREE.Scene,
   ) {
     scene.add(this.group);
-    this.ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: HIGHLIGHT, transparent: true, opacity: 0.35, depthWrite: false }));
+    this.ghost = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial({ color: HIGHLIGHT, transparent: true, opacity: 0.35, depthWrite: false }),
+    );
     this.ghost.visible = false;
     scene.add(this.ghost);
   }
@@ -70,7 +73,10 @@ export class PropSystem {
       geometry = new THREE.SphereGeometry(r, 24, 16);
       colliderDesc = R.ColliderDesc.ball(r);
     }
-    colliderDesc.setRestitution(0.2).setFriction(0.9).setMass(spec.mass ?? 2);
+    colliderDesc
+      .setRestitution(0.2)
+      .setFriction(0.9)
+      .setMass(spec.mass ?? 2);
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.55, metalness: 0.1 }));
     mesh.castShadow = false;
     mesh.name = spec.id;
@@ -117,7 +123,10 @@ export class PropSystem {
   /** Ray pick against prop meshes (click-to-select). */
   pick(ray: THREE.Ray): Prop | null {
     this.raycaster.ray.copy(ray);
-    const hits = this.raycaster.intersectObjects([...this.props.values()].map((p) => p.mesh), false);
+    const hits = this.raycaster.intersectObjects(
+      [...this.props.values()].map((p) => p.mesh),
+      false,
+    );
     const hit = hits[0];
     return hit ? (this.props.get(hit.object.name) ?? null) : null;
   }
@@ -147,7 +156,12 @@ export class PropSystem {
     if (!p) return false;
     const t = p.body.translation();
     const r = p.body.rotation();
-    this.undoStack.push({ kind: 'move', id: p.spec.id, from: new THREE.Vector3(t.x, t.y, t.z), fromQuat: new THREE.Quaternion(r.x, r.y, r.z, r.w) });
+    this.undoStack.push({
+      kind: 'move',
+      id: p.spec.id,
+      from: new THREE.Vector3(t.x, t.y, t.z),
+      fromQuat: new THREE.Quaternion(r.x, r.y, r.z, r.w),
+    });
     const dest = point.clone().add(this.restOffset(p));
     p.body.setTranslation({ x: dest.x, y: dest.y, z: dest.z }, true);
     p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);

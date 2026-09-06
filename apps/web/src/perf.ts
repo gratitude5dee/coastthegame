@@ -164,7 +164,7 @@ export function initPerf(opts: PerfOptions): PerfHandle {
   let count = 0;
   let gpu: string | undefined; // lazy: a throwaway GL context during boot would compete with the real one
   let status = '';
-  let lastOverlayAt = 0;
+  let lastOverlayAt = -Infinity; // the first tick renders at once; later ones are throttled to OVERLAY_INTERVAL_MS
   let sending = false;
 
   const overlay = document.createElement('div');

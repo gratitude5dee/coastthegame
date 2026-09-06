@@ -25,6 +25,7 @@ import { KeyboardMouseProvider } from './input/keyboardMouse';
 import { TouchProvider } from './input/touch';
 import { GamepadProvider } from './input/gamepad';
 import { initPerf } from './perf';
+import { StudioSession } from './studio/session';
 
 export interface SceneDef {
   title: string;
@@ -151,6 +152,13 @@ export class Game {
   private frame = 0;
   private crosshair: HTMLElement;
   private hint = '';
+  private studio: StudioSession | null = null;
+  private photographer: THREE.Group | null = null;
+  private billboard: THREE.Mesh | null = null;
+  private billboardVideo: HTMLVideoElement | null = null;
+  private readonly frustum = new THREE.Frustum();
+  private readonly frustumMatrix = new THREE.Matrix4();
+  private readonly subjectSphere = new THREE.Sphere();
 
   constructor(private readonly opts: GameOptions) {
     const { platform, params, hud } = opts;
@@ -183,7 +191,10 @@ export class Game {
 
     // Placeholder player (visible in director/producer): capsule + nose to show facing. Replaced by the $COAST rig in M4.
     this.playerMesh = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 1.1, 6, 16), new THREE.MeshStandardMaterial({ color: 0xffb54a, roughness: 0.6 }));
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.35, 1.1, 6, 16),
+      new THREE.MeshStandardMaterial({ color: 0xffb54a, roughness: 0.6 }),
+    );
     body.position.y = 0.9;
     const nose = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.3), new THREE.MeshStandardMaterial({ color: 0x0b0a10 }));
     nose.position.set(0, 1.45, -0.4);
@@ -192,7 +203,9 @@ export class Game {
     this.scene.add(this.playerMesh);
 
     const camParam = params.get('cam') ?? 'director';
-    this.rig = new CameraRig((['actor', 'director', 'producer'] as RigMode[]).includes(camParam as RigMode) ? (camParam as RigMode) : 'director');
+    this.rig = new CameraRig(
+      (['actor', 'director', 'producer'] as RigMode[]).includes(camParam as RigMode) ? (camParam as RigMode) : 'director',
+    );
     this.camera.fov = this.rig.params.fovDeg;
     this.camera.updateProjectionMatrix();
 
@@ -274,6 +287,15 @@ export class Game {
     this.physics?.dispose();
     this.physics = null;
     this.playerMesh.visible = false;
+    if (this.photographer) this.scene.remove(this.photographer);
+    this.photographer = null;
+    if (this.billboard) this.scene.remove(this.billboard);
+    this.billboard = null;
+    if (this.studio) {
+      this.studio.card.hide();
+      this.scene.remove(this.studio.ghost);
+      this.studio = null;
+    }
     window.__coastPhysics = false;
     window.__coastSteps = 0;
   }
@@ -405,7 +427,10 @@ export class Game {
       // Ground from the splats themselves (PHY-1 fallback). Centre the grid on the spawn.
       this.ground = groundFromSplats(this.splat, { center: spawnXZ, halfExtent: 24, cellSize: 0.75 });
       const { geometry } = physics.addGroundGrid(this.ground);
-      this.groundMesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0x3fd0ff, wireframe: true, transparent: true, opacity: 0.35 }));
+      this.groundMesh = new THREE.Mesh(
+        geometry,
+        new THREE.MeshBasicMaterial({ color: 0x3fd0ff, wireframe: true, transparent: true, opacity: 0.35 }),
+      );
       this.groundMesh.visible = this.debug;
       this.scene.add(this.groundMesh);
     }
@@ -419,15 +444,116 @@ export class Game {
     this.props = props;
     const f = this.rig.forwardXZ(new THREE.Vector3());
     const right = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0));
-    const at = (fwd: number, side: number, h: number) => feet.clone().addScaledVector(f, fwd).addScaledVector(right, side).add(new THREE.Vector3(0, h + 0.6, 0));
-    props.spawn({ id: props.nextId('crate'), shape: 'box', size: [0.35, 0.35, 0.35], color: 0xd9743a, mass: 3 }, at(2.5, -1.2, this.groundDelta(feet, f, 2.5, right, -1.2)));
-    props.spawn({ id: props.nextId('crate'), shape: 'box', size: [0.25, 0.25, 0.25], color: 0x4fa3d9, mass: 2 }, at(3.2, 0.6, this.groundDelta(feet, f, 3.2, right, 0.6)));
-    props.spawn({ id: props.nextId('can'), shape: 'cylinder', size: [0.12, 0.2], color: 0xff3fa4, mass: 0.6 }, at(2.0, 1.4, this.groundDelta(feet, f, 2.0, right, 1.4)));
-    props.spawn({ id: props.nextId('ball'), shape: 'ball', size: [0.3], color: 0x9be34a, mass: 1.5 }, at(4.5, -0.3, this.groundDelta(feet, f, 4.5, right, -0.3)));
+    const at = (fwd: number, side: number, h: number) =>
+      feet
+        .clone()
+        .addScaledVector(f, fwd)
+        .addScaledVector(right, side)
+        .add(new THREE.Vector3(0, h + 0.6, 0));
+    props.spawn(
+      { id: props.nextId('crate'), shape: 'box', size: [0.35, 0.35, 0.35], color: 0xd9743a, mass: 3 },
+      at(2.5, -1.2, this.groundDelta(feet, f, 2.5, right, -1.2)),
+    );
+    props.spawn(
+      { id: props.nextId('crate'), shape: 'box', size: [0.25, 0.25, 0.25], color: 0x4fa3d9, mass: 2 },
+      at(3.2, 0.6, this.groundDelta(feet, f, 3.2, right, 0.6)),
+    );
+    props.spawn(
+      { id: props.nextId('can'), shape: 'cylinder', size: [0.12, 0.2], color: 0xff3fa4, mass: 0.6 },
+      at(2.0, 1.4, this.groundDelta(feet, f, 2.0, right, 1.4)),
+    );
+    props.spawn(
+      { id: props.nextId('ball'), shape: 'ball', size: [0.3], color: 0x9be34a, mass: 1.5 },
+      at(4.5, -0.3, this.groundDelta(feet, f, 4.5, right, -0.3)),
+    );
+
+    this.setupStudio(feet, f, right);
 
     this.physicsReady = true;
     window.__coastPhysics = true;
     this.updateHint();
+  }
+
+  /** The Photographer (tutor NPC placeholder), the billboard, and the studio session (goal.md §3.1 steps 2, 5). */
+  private setupStudio(feet: THREE.Vector3, f: THREE.Vector3, right: THREE.Vector3) {
+    // Photographer: a blue capsule with a "camera" box, 4 m ahead and to the right.
+    const npc = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.32, 1.0, 6, 16),
+      new THREE.MeshStandardMaterial({ color: 0x4fa3d9, roughness: 0.6 }),
+    );
+    body.position.y = 0.85;
+    const cam = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.12), new THREE.MeshStandardMaterial({ color: 0x0b0a10 }));
+    cam.position.set(0.18, 1.35, -0.28);
+    npc.add(body, cam);
+    const npcPos = feet.clone().addScaledVector(f, 4).addScaledVector(right, 1.6);
+    npcPos.y = this.ground ? groundHeightAt(this.ground, npcPos.x, npcPos.z) : feet.y;
+    npc.position.copy(npcPos);
+    npc.lookAt(feet.x, npcPos.y, feet.z);
+    this.scene.add(npc);
+    this.photographer = npc;
+
+    // Billboard: "your cut plays here" until a take exists, then the recorded clip (VideoTexture).
+    const bbPos = feet.clone().addScaledVector(f, 6.5).addScaledVector(right, -2.2);
+    bbPos.y = (this.ground ? groundHeightAt(this.ground, bbPos.x, bbPos.z) : feet.y) + 1.9;
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 360;
+    const g = canvas.getContext('2d')!;
+    g.fillStyle = '#0b0a10';
+    g.fillRect(0, 0, 640, 360);
+    g.strokeStyle = 'rgba(242,236,220,.25)';
+    g.lineWidth = 4;
+    g.strokeRect(8, 8, 624, 344);
+    g.fillStyle = '#ffb54a';
+    g.font = '600 34px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.fillText('your cut plays here', 320, 170);
+    g.fillStyle = 'rgba(242,236,220,.7)';
+    g.font = '22px system-ui, sans-serif';
+    g.fillText('talk to the photographer · Enter = action / cut', 320, 215);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const bb = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 1.8), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    bb.position.copy(bbPos);
+    bb.lookAt(feet.x, bbPos.y, feet.z);
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(3.4, 2.0, 0.08),
+      new THREE.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.9 }),
+    );
+    frame.position.set(0, 0, -0.05);
+    bb.add(frame);
+    this.scene.add(bb);
+    this.billboard = bb;
+
+    const studio = new StudioSession(
+      document.body,
+      this.scene,
+      this.playerMesh,
+      this.renderer.domElement,
+      this.cellId ?? this.currentSceneId,
+    );
+    studio.onClip = (url) => this.showClip(url);
+    this.studio = studio;
+    if (this.opts.params.get('mission') === '1') studio.brief();
+  }
+
+  private showClip(url: string | null) {
+    if (!url || !this.billboard) return;
+    const v = this.billboardVideo ?? document.createElement('video');
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.src = url;
+    v.play().catch(() => {});
+    if (!this.billboardVideo) {
+      this.billboardVideo = v;
+      const tex = new THREE.VideoTexture(v);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = this.billboard.material as THREE.MeshBasicMaterial;
+      mat.map = tex;
+      mat.needsUpdate = true;
+    }
   }
 
   /** Ground height difference between the spawn and a point offset from it (so props start above the terrain). */
@@ -503,16 +629,35 @@ export class Game {
     const props = this.props;
     if (!props || !this.character) return;
 
+    // Studio: roll / cut / playback (goal.md §3.1 steps 4–5)
+    if (this.studio) {
+      if (i.action) {
+        const r = this.studio.action(this.frameContext());
+        if (r === 'ignored' && this.studio.state === 'idle') this.studio.card.setStatus('walk up to the photographer first');
+        this.updateHint();
+      }
+      if (i.playback) this.studio.togglePlayback(performance.now());
+    }
+
     // Grab / throw (PHY-2)
     if (i.interact) {
-      if (props.grabbed) props.release(null);
-      else {
+      if (props.grabbed) {
+        this.studio?.edit(performance.now(), { kind: 'propRelease', propId: props.grabbed.spec.id });
+        props.release(null);
+      } else {
         const near = this.nearestProp(2.6);
-        if (near) props.grab(near);
+        if (near) {
+          props.grab(near);
+          this.studio?.edit(performance.now(), { kind: 'propGrab', propId: near.spec.id });
+        }
       }
     }
     if (i.throwEdge && props.grabbed) {
-      const v = this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(9).add(new THREE.Vector3(0, 3, 0));
+      const v = this.camera
+        .getWorldDirection(new THREE.Vector3())
+        .multiplyScalar(9)
+        .add(new THREE.Vector3(0, 3, 0));
+      this.studio?.edit(performance.now(), { kind: 'propThrow', propId: props.grabbed.spec.id, velocity: [v.x, v.y, v.z] });
       props.release(v);
     }
 
@@ -521,12 +666,19 @@ export class Game {
       const ray = this.pointerRay();
       if (ray) {
         if (props.grabbed) {
-          const v = this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(9).add(new THREE.Vector3(0, 3, 0));
+          const v = this.camera
+            .getWorldDirection(new THREE.Vector3())
+            .multiplyScalar(9)
+            .add(new THREE.Vector3(0, 3, 0));
+          this.studio?.edit(performance.now(), { kind: 'propThrow', propId: props.grabbed.spec.id, velocity: [v.x, v.y, v.z] });
           props.release(v);
         } else if (props.selected) {
           const hit = this.groundHit(ray);
-          if (hit) props.placeSelectedAt(hit);
-          else props.select(props.pick(ray));
+          if (hit) {
+            const id = props.selected.spec.id;
+            props.placeSelectedAt(hit);
+            this.studio?.edit(performance.now(), { kind: 'propPlace', propId: id, pos: [hit.x, hit.y, hit.z] });
+          } else props.select(props.pick(ray));
         } else {
           props.select(props.pick(ray));
           if (props.selected) performance.mark('coast:act-preview');
@@ -566,9 +718,15 @@ export class Game {
     const look = { yaw: this.input.look.x, pitch: this.input.look.y, zoom: this.input.zoom };
     if (ch) {
       this.rig.update(dt, this.camera, { feet, yaw: ch.yaw, eyeHeight: EYE_HEIGHT }, look);
+      // Keep follow cameras above the terrain (low-angle shots may dip, never clip through the ground).
+      if (this.ground && this.rig.mode !== 'actor') {
+        const minY = groundHeightAt(this.ground, this.camera.position.x, this.camera.position.z) + 0.25;
+        if (this.camera.position.y < minY) this.camera.position.y = minY;
+      }
       this.playerMesh.visible = this.rig.mode !== 'actor';
       this.playerMesh.position.copy(feet);
       this.playerMesh.rotation.y = ch.yaw;
+      this.updateStudio(feet);
     } else if (!this.sceneDef.world) {
       // Object scenes (butterfly): free orbit-ish look with drag, no character.
       this.rig.yaw -= look.yaw;
@@ -633,13 +791,61 @@ export class Game {
     return feet.addScaledVector(f, 1.2).add(new THREE.Vector3(0, 1.0, 0));
   }
 
+  /** Studio per-frame: proximity brief by the Photographer, take sampling + judging (goal.md MIS-2). */
+  private updateStudio(feet: THREE.Vector3) {
+    const studio = this.studio;
+    if (!studio) return;
+    if (studio.state === 'idle' && this.photographer && feet.distanceTo(this.photographer.position) < 2.6) {
+      studio.brief();
+      this.updateHint();
+    }
+    if (this.photographer) this.photographer.lookAt(feet.x, this.photographer.position.y, feet.z);
+    studio.tick(this.frameContext());
+  }
+
+  private frameContext() {
+    const ch = this.character!;
+    const feet = ch.feet(new THREE.Vector3());
+    const camH = this.ground
+      ? this.camera.position.y - groundHeightAt(this.ground, this.camera.position.x, this.camera.position.z)
+      : this.camera.position.y - feet.y;
+    return {
+      nowMs: performance.now(),
+      feet,
+      yaw: ch.yaw,
+      speed: ch.speed,
+      grounded: ch.grounded,
+      camera: this.camera,
+      cameraHeightM: camH,
+      subjectInFrame: this.subjectInFrame('crate_1'),
+      timePreset: this.timePreset,
+      cell: this.cellId ?? this.currentSceneId,
+    };
+  }
+
+  /** Frustum test of a prop's bounding sphere (subjectInFrame constraint). */
+  private subjectInFrame(propId: string): boolean {
+    const p = this.props?.props.get(propId);
+    if (!p) return false;
+    this.frustumMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.frustumMatrix);
+    if (!p.mesh.geometry.boundingSphere) p.mesh.geometry.computeBoundingSphere();
+    this.subjectSphere.copy(p.mesh.geometry.boundingSphere!).applyMatrix4(p.mesh.matrixWorld);
+    return this.frustum.intersectsSphere(this.subjectSphere);
+  }
+
   private updateHint() {
     const p = this.props;
     if (!this.physicsReady) this.hint = 'loading physics…';
     else if (p?.grabbed) this.hint = 'E drop · F / click throw';
     else if (p?.selected) this.hint = 'click the ground = put it there · Esc cancel · Z undo';
-    else if (this.rig.mode === 'actor') this.hint = 'click to lock the mouse · WASD · Space jump · Shift sprint · E grab · click a prop then the ground = put that there';
-    else if (this.rig.mode === 'director') this.hint = 'drag to orbit · wheel zoom · WASD move · click a prop then the ground = put that there · E grab';
+    else if (this.studio?.state === 'recording') this.hint = '● recording — Enter to cut';
+    else if (this.studio?.state === 'briefed')
+      this.hint = 'Enter = action · get low (drag the camera down) · keep the crate in frame · T for golden hour';
+    else if (this.rig.mode === 'actor')
+      this.hint = 'click to lock the mouse · WASD · Space jump · Shift sprint · E grab · click a prop then the ground = put that there';
+    else if (this.rig.mode === 'director')
+      this.hint = 'drag to orbit · wheel zoom · WASD move · click a prop then the ground = put that there · E grab';
     else this.hint = 'overhead: drag to orbit · wheel zoom · click a prop, then click where it goes';
   }
 

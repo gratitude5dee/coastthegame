@@ -59,6 +59,8 @@ export class KeyboardMouseProvider implements InputProvider {
     out.timeCycle = out.timeCycle || this.edges.has('KeyT');
     out.debugToggle = out.debugToggle || this.edges.has('KeyC');
     out.resetEdge = out.resetEdge || this.edges.has('KeyR');
+    out.action = out.action || this.edges.has('Enter') || this.edges.has('NumpadEnter');
+    out.playback = out.playback || this.edges.has('KeyP');
     for (let i = 1; i <= 4; i++) if (this.edges.has(`Digit${i}`)) out.sceneKey = i;
 
     const locked = document.pointerLockElement === this.canvas;

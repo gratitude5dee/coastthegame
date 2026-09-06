@@ -28,6 +28,7 @@ export class GamepadProvider implements InputProvider {
     if (edge(1)) out.throwEdge = true; // B
     if (edge(3)) out.modeCycle = true; // Y
     if (edge(5)) out.undo = true; // RB
+    if (edge(9)) out.action = true; // Start
     out.sprint = out.sprint || pressed(4); // LB
   }
 

@@ -1,23 +1,8 @@
 /**
- * Studio data model (goal.md §7.7 STU-*, §7.8 GEN-*). Implementation lands in M4 (takes) and M6 (shots/export).
+ * Studio data model (goal.md §7.7 STU-*, §7.8 GEN-*). Takes (ACT-2/ACT-4, SCH-4 v0: `TakeV1`, recorder, player, codec,
+ * session store) live in ./takes; shots/export land in M6.
  */
-import type { Intent } from '@coast/engine';
-
-export interface PoseFrame {
-  t: number; // seconds from take start
-  root: [number, number, number, number, number, number, number]; // pos xyz + quat xyzw
-  bones?: Float32Array; // optional compact bone quats for exact replay
-  intents?: Intent[];
-}
-
-export interface Take {
-  id: string;
-  actorId: string;
-  worldVersion: string; // cell.json version — replays are only valid against it (ACT-4)
-  fps: 30;
-  frames: PoseFrame[];
-  durationS: number;
-}
+export * from './takes';
 
 export type PassName = 'beauty' | 'depth' | 'normal' | 'id' | 'pose';
 

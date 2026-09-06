@@ -77,3 +77,28 @@ test('physics smoke: rapier + character controller step without errors', async (
   expect(errors, errors.join('\n')).toHaveLength(0);
   expect(await page.locator('#hud').innerText()).toContain('physics');
 });
+
+// Vertical-slice loop (goal.md §3.1 steps 4–6 / M3.5): mission briefed → Enter rolls (MediaRecorder + TakeRecorder) →
+// Enter cuts → verdict with ★, hints and a downloadable clip; the take replays as a ghost.
+test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  await page.goto('/?scene=butterfly&physics=1&cam=director&mission=1&tier=desktop');
+  await page.waitForFunction(() => (window as unknown as { __coastPhysics?: boolean }).__coastPhysics === true, null, { timeout: 90_000 });
+  await page.waitForSelector('.mc-title', { timeout: 30_000 });
+  await expect(page.locator('.mc-state')).toContainText(/roll/i);
+  await page.keyboard.press('Enter'); // action
+  await expect(page.locator('.mc-state')).toContainText('REC', { timeout: 15_000 });
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(2500);
+  await page.keyboard.up('KeyW');
+  await page.keyboard.press('Enter'); // cut
+  await page.waitForSelector('.mc-verdict', { timeout: 30_000 });
+  await expect(page.locator('.mc-stars')).toHaveText(/^[★☆]{3}$/); // a short noon take off-subject scores ☆☆☆ — the judge works
+  await expect(page.locator('.mc-hints')).toContainText(/take|frame|golden|camera/i);
+  const download = page.locator('.mc-actions a[download]');
+  await expect(download).toHaveCount(1, { timeout: 15_000 });
+  expect(await download.getAttribute('href')).toMatch(/^blob:/);
+  expect(errors, errors.join('\n')).toHaveLength(0);
+});
