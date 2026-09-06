@@ -1309,13 +1309,18 @@ export class Game {
     const painter = this.painter;
     const can = this.props?.grabbed;
     if (!painter || !can || !ray || !this.splat) return;
+    // Nearest surface along the ray: the splats themselves (walls, objects — Spark raycasts the LoD subset, which can
+    // slip between thin ground splats) or the physics ground / collider (solid, so the floor always takes paint).
     this.raycaster.ray.copy(ray);
     const hits: THREE.Intersection[] = [];
     this.splat.raycast(this.raycaster, hits);
     hits.sort((a, b) => a.distance - b.distance);
-    const hit = hits[0];
+    let point = hits[0]?.point ?? null;
+    const ground = this.groundHit(ray);
+    if (ground && (!point || ray.origin.distanceTo(ground) < ray.origin.distanceTo(point))) point = ground;
     // Arm's reach is measured from the hand (the can), not from a chase camera sitting metres behind the player.
-    if (!hit || hit.point.distanceTo(this.holdPoint()) > Game.SPRAY_RANGE) return;
+    if (!point || point.distanceTo(this.holdPoint()) > Game.SPRAY_RANGE) return;
+    const hit = { point };
     this.sprayColor.setHex(can.spec.color);
     const puff = painter.spray(hit.point, this.sprayColor, 0.22);
     if (!puff) return;
