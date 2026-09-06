@@ -1,8 +1,9 @@
 /**
  * Studio data model (goal.md §7.7 STU-*, §7.8 GEN-*). Takes (ACT-2/ACT-4, SCH-4 v0: `TakeV1`, recorder, player, codec,
- * session store) live in ./takes; shots/export land in M6.
+ * session store) live in ./takes; the set (multi-take blocking) in ./set; shots/export land in M6.
  */
 export * from './takes';
+export * from './set';
 
 export type PassName = 'beauty' | 'depth' | 'normal' | 'id' | 'pose';
 

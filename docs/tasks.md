@@ -45,7 +45,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 - [ ] Tripo adapter; $COAST hero (rig mixamo + clip set + 3 outfits)
 - [ ] Selfie → avatar pipeline ≤4 min (QB-8); 8 premade + randomize
 - [~] 7 NPCs: navmesh, behaviours, cached dialogue + TTS (AUD-1) — **4 NPCs walking** (`packages/engine/src/npc/`: Recast navmesh baked at runtime from the cell collider or the splat-derived ground grid, Detour crowd with avoidance; `NpcBrain` idle · loiter · approach · greet; `apps/web/src/npc/npcs.ts`: kinematic capsules, `#coast-sub` subtitles) — the Photographer walks up and briefs you, Rico/Mari/Dee greet in passing; skinned rigs, 3 more NPCs, TTS pending
-- [ ] Possess / record / replay + 3-take demo
+- [~] Possess / record / replay + 3-take demo — **multi-take blocking** (`packages/studio/src/set.ts`: the mission's takes replay together, in sync, while the next one rolls; ghosts hold their mark; the set loops after the cut) + **possession** (V / Back / BE swaps identity and place with the nearest NPC; takes carry the actor id, ghosts wear that look; driving poses replay as a see-through lowrider) — skinned rigs, bone tracks and world-edit replay pending
 
 ## M5 — Director & voice (CAM-_, DIR-_)
 

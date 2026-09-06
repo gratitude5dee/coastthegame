@@ -3,29 +3,39 @@
  * - Video: real-time capture of the beauty render via `canvas.captureStream(0)` + `requestFrame()` after every render
  *   (so every drawn frame reaches the encoder even at 2 fps on a weak GPU) + MediaRecorder (the offline fixed-step
  *   re-render with passes is M6, STU-1/2). The clip is the billboard texture and the download (STU-3 video-only).
- * - Poses: TakeRecorder at 30 Hz (ACT-2) → TakePlayer drives a ghost actor on playback.
+ * - Poses: TakeRecorder at 30 Hz (ACT-2) → the mission's takes form a *set* (TakeSet, multi-take blocking): every
+ *   earlier take replays as a ghost, in sync, while the next one rolls, and the whole set loops after the cut.
+ * - Possession (ACT-3): `actorId` names who is performing; each take carries it and its ghost wears that look.
  * - Judge: ShotMeter live scores → Verdict at cut (MIS-2/3).
  */
 import * as THREE from 'three';
 import {
   MISSIONS_V0,
   ShotMeter,
-  TakePlayer,
   TakeRecorder,
+  TakeSet,
+  setTime,
   takeStore,
   type ConstraintResult,
   type MeterSample,
   type Mission,
+  type TakePose,
   type TakeV1,
   type Verdict,
   type WorldEditInput,
 } from '@coast/studio';
 import { createMissionCard, type MissionCard } from '../ui/missionCard';
+import { GhostActor, type ActorLook } from './ghosts';
+
+/** Gives a ghost body to a take's performer (the game knows the looks; tests get capsules). */
+export type GhostFactory = (actorId: string) => GhostActor;
 
 export type SessionState = 'idle' | 'briefed' | 'recording' | 'verdict';
 
 /** Clip codecs in preference order; the first supported one records, the next takes over if it dies mid-take. */
 const MIME_CANDIDATES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+/** How long a cut waits for the clip recorder's final chunk before moving on without it. */
+const STOP_MEDIA_TIMEOUT_MS = 4000;
 
 export interface FrameContext {
   nowMs: number;
@@ -33,6 +43,8 @@ export interface FrameContext {
   yaw: number;
   speed: number;
   grounded: boolean;
+  /** At the wheel of the lowrider (the pose is the car's). */
+  driving?: boolean;
   camera: THREE.PerspectiveCamera;
   cameraHeightM: number;
   /** The current mission's subject (see `StudioSession.subjectId`) is inside the frustum. */
@@ -57,10 +69,14 @@ export class StudioSession {
   lastVerdict: Verdict | null = null;
   lastClipUrl: string | null = null;
   readonly card: MissionCard;
-  /** Ghost actor driven by TakePlayer during playback (a translucent clone of the player placeholder). */
-  readonly ghost: THREE.Group;
-  private player: TakePlayer | null = null;
+  /** Who is performing the next take ('player' unless possessing an NPC, ACT-3). */
+  actorId = 'player';
+  /** The mission's takes so far — they replay together (multi-take blocking). */
+  readonly set = new TakeSet(3);
+  /** One ghost body per set layer, same order. */
+  readonly ghosts: GhostActor[] = [];
   private playbackStartMs = 0;
+  private playbackLoop = true;
   playing = false;
 
   private meter: ShotMeter;
@@ -72,14 +88,15 @@ export class StudioSession {
   private track: (MediaStreamTrack & { requestFrame?: () => void }) | null = null;
   private chunks: Blob[] = [];
   private startMs = 0;
-  private readonly tmpQ = new THREE.Quaternion();
-  private readonly ghostPose = {
-    pos: [0, 0, 0] as [number, number, number],
+  private readonly ghostPose: TakePose = {
+    pos: [0, 0, 0],
     yaw: 0,
     speed: 0,
-    camPos: [0, 0, 0] as [number, number, number],
-    camQuat: [0, 0, 0, 1] as [number, number, number, number],
+    driving: false,
+    camPos: [0, 0, 0],
+    camQuat: [0, 0, 0, 1],
   };
+  private readonly makeGhost: GhostFactory;
 
   constructor(
     parent: HTMLElement,
@@ -89,6 +106,7 @@ export class StudioSession {
     private readonly cellVersion: string,
     missions: Mission[] = MISSIONS_V0,
     startIndex = 0,
+    ghostFactory?: GhostFactory,
   ) {
     this.card = createMissionCard(parent);
     this.missions = missions.length ? missions : MISSIONS_V0;
@@ -96,19 +114,13 @@ export class StudioSession {
     this.mission = this.missions[this.missionIndex]!;
     this.meter = new ShotMeter(this.mission);
     this.recorder = new TakeRecorder({ actorId: 'player', cellVersion });
-    this.ghost = playerTemplate.clone(true);
-    this.ghost.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) {
-        const mat = (m.material as THREE.MeshStandardMaterial).clone();
-        mat.transparent = true;
-        mat.opacity = 0.45;
-        mat.color.setHex(0x9be34a);
-        m.material = mat;
-      }
-    });
-    this.ghost.visible = false;
-    scene.add(this.ghost);
+    const fallbackLook: ActorLook = { color: 0x9be34a, name: 'replay' };
+    this.makeGhost = ghostFactory ?? (() => new GhostActor(scene, playerTemplate, null, fallbackLook));
+  }
+
+  /** The ghost bodies currently performing (visible during a rolling take or a looping playback). */
+  get ghostsVisible() {
+    return this.playing ? this.ghosts.length : 0;
   }
 
   /** The mission's framing subject ('crate_1', 'lowrider', …) or null when it has no subjectInFrame constraint. */
@@ -143,10 +155,12 @@ export class StudioSession {
       this.mission = this.missions[this.missionIndex]!;
       this.meter = new ShotMeter(this.mission);
       this.takesUsed = 0;
+      this.clearSet(); // a new shot: fresh set
       this.card.hide();
     } else if (done) {
       this.card.setStatus('reel complete — replay any mission from the photographer');
       this.takesUsed = 0;
+      this.clearSet();
     }
     this.state = 'idle';
     return this.mission;
@@ -172,7 +186,9 @@ export class StudioSession {
     this.state = 'recording';
     this.startMs = ctx.nowMs;
     this.meter.reset();
-    this.recorder.start(ctx.nowMs);
+    this.recorder.start(ctx.nowMs, this.actorId);
+    // Multi-take blocking: the earlier takes of this shot perform again, on the take clock, while this one rolls.
+    if (this.set.size > 0) this.startPlayback(ctx.nowMs, false);
     this.chunks = [];
     this.media = null;
     this.mediaCandidates = MIME_CANDIDATES.filter((m) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m));
@@ -247,6 +263,7 @@ export class StudioSession {
       yaw: ctx.yaw,
       speed: ctx.speed,
       grounded: ctx.grounded,
+      driving: ctx.driving ?? false,
       camPos: [ctx.camera.position.x, ctx.camera.position.y, ctx.camera.position.z],
       camQuat: [q.x, q.y, q.z, q.w],
     });
@@ -276,6 +293,8 @@ export class StudioSession {
     this.lastTake = take;
     this.takesUsed++;
     this.state = 'verdict';
+    this.stopPlayback();
+    this.addToSet(take);
     const verdict = this.meter.finish(elapsed, take.id);
     this.lastVerdict = verdict;
     if (verdict.stars > (this.stars.get(this.mission.id) ?? 0)) this.stars.set(this.mission.id, verdict.stars);
@@ -293,7 +312,7 @@ export class StudioSession {
       onPlayback: () => this.startPlayback(performance.now()),
     });
     this.onClip?.(this.lastClipUrl, verdict);
-    this.startPlayback(performance.now());
+    this.startPlayback(performance.now(), true);
   }
 
   /** Hook for the game: show the clip on the billboard. */
@@ -304,7 +323,16 @@ export class StudioSession {
     this.media = null;
     if (!m) return Promise.resolve(null);
     return new Promise((resolve) => {
-      const done = () => resolve(this.chunks.length ? new Blob(this.chunks, { type: m.mimeType || 'video/webm' }) : null);
+      // A recorder whose encoder died never fires `stop` (seen on software GL after a few captures): cap the wait and
+      // keep whatever chunks it delivered — the verdict must never hang on the clip.
+      const timer = setTimeout(() => {
+        console.warn('clip recorder did not stop in time — keeping what it gave');
+        done();
+      }, STOP_MEDIA_TIMEOUT_MS);
+      const done = () => {
+        clearTimeout(timer);
+        resolve(this.chunks.length ? new Blob(this.chunks, { type: m.mimeType || 'video/webm' }) : null);
+      };
       m.onstop = done;
       m.onerror = done;
       try {
@@ -324,32 +352,53 @@ export class StudioSession {
     this.card.setStatus(`Take ${this.takesUsed + 1} of ${this.mission.takesMax} — Enter to roll`);
   }
 
-  startPlayback(nowMs: number) {
-    if (!this.lastTake || this.lastTake.samples.length < 2) return;
-    this.player = new TakePlayer(this.lastTake);
+  /** Replay the set from `nowMs`: looping on its own (P, after a cut) or once, on the take clock, under a rolling take. */
+  startPlayback(nowMs: number, loop = true) {
+    if (this.set.size === 0) return;
     this.playbackStartMs = nowMs;
+    this.playbackLoop = loop;
     this.playing = true;
-    this.ghost.visible = true;
+    this.set.rewind();
+    for (const g of this.ghosts) g.visible = true;
+    this.updatePlayback(nowMs);
   }
 
   stopPlayback() {
     this.playing = false;
-    this.ghost.visible = false;
+    for (const g of this.ghosts) g.visible = false;
   }
 
   togglePlayback(nowMs: number) {
     if (this.playing) this.stopPlayback();
-    else this.startPlayback(nowMs);
+    else this.startPlayback(nowMs, true);
   }
 
   private updatePlayback(nowMs: number) {
-    const p = this.player;
-    if (!p) return;
-    const t = ((nowMs - this.playbackStartMs) / 1000) % Math.max(p.durationS, 0.001);
-    const pose = p.poseAt(t, this.ghostPose);
-    this.ghost.position.set(pose.pos[0], pose.pos[1], pose.pos[2]);
-    this.ghost.rotation.y = pose.yaw;
-    this.tmpQ.set(pose.camQuat[0], pose.camQuat[1], pose.camQuat[2], pose.camQuat[3]);
+    const t = setTime(nowMs, this.playbackStartMs, this.set.durationS, this.playbackLoop);
+    for (let i = 0; i < this.ghosts.length; i++) {
+      const pose = this.set.poseAt(i, t, this.ghostPose);
+      if (pose) this.ghosts[i]!.setPose(pose);
+    }
+  }
+
+  private addToSet(take: TakeV1) {
+    if (take.samples.length < 2) return;
+    this.set.add(take);
+    const ghost = this.makeGhost(take.actorId);
+    this.ghosts.push(ghost);
+    while (this.ghosts.length > this.set.size) this.ghosts.shift()?.dispose(); // the set dropped its oldest layer
+  }
+
+  private clearSet() {
+    this.stopPlayback();
+    this.set.clear();
+    for (const g of this.ghosts) g.dispose();
+    this.ghosts.length = 0;
+  }
+
+  dispose() {
+    this.clearSet();
+    this.card.hide();
   }
 
   liveResults(): ConstraintResult[] | null {

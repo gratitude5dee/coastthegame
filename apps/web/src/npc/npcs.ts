@@ -23,6 +23,8 @@ export interface Npc {
   spec: NpcSpec;
   brain: NpcBrain;
   mesh: THREE.Group;
+  /** The capsule (its material carries the identity's colour). */
+  capsule: THREE.Mesh<THREE.CapsuleGeometry, THREE.MeshStandardMaterial>;
   body: RAPIER_NS.RigidBody;
   agent: CrowdAgent | null;
   facing: number;
@@ -93,6 +95,7 @@ export class NpcSystem {
       spec,
       brain: new NpcBrain({ home: [pos.x, pos.y, pos.z], approaches: spec.approaches ?? false, random: this.random }),
       mesh,
+      capsule: body,
       body: rb,
       agent: this.nav ? this.nav.addAgent(pos, { maxSpeed: spec.speed ?? 1.4 }) : null,
       facing: 0,
@@ -105,6 +108,53 @@ export class NpcSystem {
 
   byId(id: string): Npc | undefined {
     return this.npcs.find((n) => n.spec.id === id);
+  }
+
+  /** The NPC nearest to `point` within `maxDist` metres (horizontal), or null. */
+  nearest(point: THREE.Vector3, maxDist: number): Npc | null {
+    let best: Npc | null = null;
+    let bestD = maxDist;
+    for (const n of this.npcs) {
+      const d = Math.hypot(n.mesh.position.x - point.x, n.mesh.position.z - point.z);
+      if (d <= bestD) {
+        bestD = d;
+        best = n;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Possession (goal.md ACT-3): the player takes over `npc`'s identity and place, and the NPC entity carries on as
+   * `identity` from `feet` (where the player stood, facing `yaw`) — an unpossessed actor loiters there like any other.
+   * Returns the identity and spot the player now owns. Same call switches back: possess the body that carries you.
+   */
+  swapIdentity(npc: Npc, identity: NpcSpec, feet: THREE.Vector3, yaw: number): { spec: NpcSpec; position: THREE.Vector3; yaw: number } {
+    const was = { spec: npc.spec, position: npc.mesh.position.clone(), yaw: npc.mesh.rotation.y };
+    const pos = feet.clone();
+    if (this.ground) pos.y = groundHeightAt(this.ground, pos.x, pos.z);
+    npc.spec = { ...identity, home: pos.clone() };
+    npc.capsule.material.color.setHex(identity.color);
+    npc.mesh.position.copy(pos);
+    npc.mesh.rotation.y = yaw;
+    npc.facing = yaw;
+    npc.faceTarget = null;
+    npc.lineIndex = 0;
+    npc.body.setTranslation({ x: pos.x, y: pos.y + 0.9, z: pos.z }, true);
+    npc.body.setNextKinematicTranslation({ x: pos.x, y: pos.y + 0.9, z: pos.z });
+    if (npc.agent && this.nav) {
+      this.nav.stop(npc.agent);
+      const snapped = this.nav.snap(pos, 3) ?? pos;
+      npc.agent.teleport({ x: snapped.x, y: snapped.y, z: snapped.z });
+    }
+    // A fresh brain, but not a fresh greeting: the body you just stepped out of does not hail you on the spot.
+    npc.brain = new NpcBrain({
+      home: [pos.x, pos.y, pos.z],
+      approaches: identity.approaches ?? false,
+      greetDelay: 10,
+      random: this.random,
+    });
+    return was;
   }
 
   /** Per frame: brains → crowd → meshes/bodies. `paused` (diorama) freezes everyone. */

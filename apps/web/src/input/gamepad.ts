@@ -32,6 +32,7 @@ export class GamepadProvider implements InputProvider {
     if (edge(3)) out.modeCycle = true; // Y
     if (edge(5)) out.undo = true; // RB
     if (edge(9)) out.action = true; // Start
+    if (edge(8)) out.possess = true; // Back / Select
     if (edge(7)) out.beatToggle = true; // RT
     out.sprint = out.sprint || pressed(4); // LB
     if (pressed(12)) out.hydro.y += 1; // d-pad up = front up

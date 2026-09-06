@@ -45,7 +45,8 @@ import { initPerf } from './perf';
 import { StudioSession } from './studio/session';
 import { Metronome } from './audio/metronome';
 import { Sfx } from './audio/sfx';
-import { NpcSystem } from './npc/npcs';
+import { NpcSystem, type NpcSpec } from './npc/npcs';
+import { GhostActor } from './studio/ghosts';
 import { createSubtitles, type Subtitles } from './ui/subtitles';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
 
@@ -120,6 +121,17 @@ const CAR_FOLLOW = { distance: 2.1, height: 1.0 };
 /** Beat-driven hydraulics pattern per beat in the bar (PHY-3 "driven by the track's beat grid"). */
 const AUTO_HOP_PATTERN: HopPattern[] = ['front', 'back', 'left', 'right'];
 const ENTER_DISTANCE = 3.4;
+/** Possession reach (ACT-3): the nearest NPC within this many metres swaps bodies with you on V / Back / BE. */
+const POSSESS_DISTANCE = 4;
+/** $COAST — the identity the player starts with; an unpossessed $COAST loiters like any NPC. */
+const PLAYER_IDENTITY: NpcSpec = {
+  id: 'player',
+  name: '$COAST',
+  color: 0xffb54a,
+  home: new THREE.Vector3(),
+  lines: ['West Coast.', 'Roll it.'],
+  approaches: false,
+};
 const LEAVE_DISTANCE = 4.5;
 const VERDICT_GRACE_MS = 6000;
 
@@ -144,6 +156,7 @@ declare global {
     __coastDiorama?: boolean;
     __coastPaint?: { count: number; strokes: number };
     __coastNpcs?: { count: number; nav: boolean; greets: number; photographer: [number, number, number] | null };
+    __coastStudio?: { actorId: string; setSize: number; ghosts: number; state: string; possessed: number };
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -237,6 +250,11 @@ export class Game {
   private studio: StudioSession | null = null;
   private npcs: NpcSystem | null = null;
   private subtitles: Subtitles | null = null;
+  /** Who the player is right now (ACT-3): $COAST, or an NPC identity taken over with V. */
+  private identity: NpcSpec = PLAYER_IDENTITY;
+  private possessions = 0;
+  /** Looks by actor id (for take ghosts): the player + every NPC identity spawned in this level. */
+  private readonly looks = new Map<string, { color: number; name: string }>();
   private billboard: THREE.Mesh | null = null;
   private billboardVideo: HTMLVideoElement | null = null;
   private readonly frustum = new THREE.Frustum();
@@ -416,10 +434,11 @@ export class Game {
     if (this.billboard) this.world.remove(this.billboard);
     this.billboard = null;
     if (this.studio) {
-      this.studio.card.hide();
-      this.world.remove(this.studio.ghost);
+      this.studio.dispose();
       this.studio = null;
     }
+    if (this.identity !== PLAYER_IDENTITY) this.setIdentity(PLAYER_IDENTITY);
+    this.looks.clear();
     window.__coastPhysics = false;
     window.__coastSteps = 0;
   }
@@ -859,6 +878,7 @@ export class Game {
     });
     this.npcs = npcs;
     const at = (fwd: number, side: number) => feet.clone().addScaledVector(f, fwd).addScaledVector(right, side);
+    this.looks.set(PLAYER_IDENTITY.id, { color: PLAYER_IDENTITY.color, name: PLAYER_IDENTITY.name });
     npcs.spawn({
       id: 'photographer',
       name: 'Photographer',
@@ -875,6 +895,7 @@ export class Game {
     npcs.spawn({ id: 'npc_a', name: 'Rico', color: 0xd9a03a, home: at(9, -5), lines: ['Yo $COAST!', 'Nice ride.'] });
     npcs.spawn({ id: 'npc_b', name: 'Mari', color: 0xb35cd9, home: at(-3, 6), lines: ['Tag that wall.', 'Hop it on the one.'] });
     npcs.spawn({ id: 'npc_c', name: 'Dee', color: 0x3ad98a, home: at(7, 7), lines: ['Low and slow.', 'That your cut on the billboard?'] });
+    for (const n of npcs.npcs) this.looks.set(n.spec.id, { color: n.spec.color, name: n.spec.name });
     // Navmesh: the cell collider when there is one, else the splat-derived ground grid (bounded to the scan coverage).
     const walkable: THREE.Mesh[] = [];
     for (const m of this.colliderMeshes) m.traverse((o) => ((o as THREE.Mesh).isMesh ? walkable.push(o as THREE.Mesh) : null));
@@ -934,8 +955,17 @@ export class Game {
       this.cellId ?? this.currentSceneId,
       undefined,
       missionParam > 0 ? missionParam - 1 : 0,
+      (actorId) =>
+        new GhostActor(
+          this.world,
+          this.playerMesh,
+          this.vehicle?.group ?? null,
+          this.looks.get(actorId) ?? { color: 0x9be34a, name: actorId },
+          CAR_FEET_DROP,
+        ),
     );
     studio.onClip = (url) => this.showClip(url);
+    studio.actorId = this.identity.id;
     this.studio = studio;
     if (missionParam > 0) studio.brief(); // QA: `?mission=n` auto-briefs mission n
   }
@@ -1094,6 +1124,7 @@ export class Game {
       }
       if (i.playback) this.studio.togglePlayback(performance.now());
     }
+    if (i.possess && !wasDriving && !this.inXr) this.possessNearest();
 
     // Grab / throw (PHY-2) — or get in the lowrider when it is the closer thing (never on the edge that just got out).
     if (i.interact && !wasDriving) {
@@ -1431,6 +1462,7 @@ export class Game {
   private updateStudio(feet: THREE.Vector3) {
     const studio = this.studio;
     if (!studio) return;
+    this.syncStudioHook();
     const photographer = this.npcs?.byId('photographer');
     const npcDist = photographer ? feet.distanceTo(photographer.mesh.position) : Infinity;
     if (studio.state === 'idle' && npcDist < 2.6) {
@@ -1448,7 +1480,64 @@ export class Game {
     studio.tick(this.frameContext());
   }
 
+  /**
+   * Possession (goal.md ACT-3): swap bodies with the nearest NPC within reach — you take their identity and spot, they
+   * carry on as who you were (loitering where you stood). Doing it again next to that body switches back. The camera
+   * rig follows the capsule, so it re-targets for free; takes from here on carry the new actor id and their ghosts wear
+   * that look (the 3-take demo: $COAST, then the Photographer, then Rico, all in one scene).
+   */
+  private possessNearest() {
+    const ch = this.character;
+    const npcs = this.npcs;
+    if (!ch || !npcs || this.studio?.state === 'recording') return;
+    const feet = ch.feet(new THREE.Vector3());
+    const npc = npcs.nearest(feet, POSSESS_DISTANCE);
+    if (!npc) {
+      this.hint = 'nobody within reach to possess';
+      return;
+    }
+    const was = npcs.swapIdentity(npc, this.identity, feet, ch.yaw);
+    this.setIdentity(was.spec);
+    ch.teleport(was.position);
+    ch.yaw = was.yaw;
+    this.rig.yaw = was.yaw;
+    this.possessions++;
+    this.sfx.tick(this.identity.id === PLAYER_IDENTITY.id ? 500 : 1500);
+    this.subtitles?.say(
+      this.identity.name,
+      this.identity.id === PLAYER_IDENTITY.id ? 'Back in my own shoes.' : `You're ${this.identity.name} now.`,
+      2500,
+    );
+    this.updateHint();
+    this.syncNpcHook();
+  }
+
+  /** Wear an identity: the placeholder's colour and the take recorder's actor id follow it. */
+  private setIdentity(spec: NpcSpec) {
+    this.identity = spec;
+    const body = this.playerMesh.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+    body?.material.color.setHex(spec.color);
+    if (this.studio) this.studio.actorId = spec.id;
+  }
+
+  private npcNearby() {
+    if (!this.character || !this.npcs) return null;
+    return this.npcs.nearest(this.character.feet(this.tmpV), POSSESS_DISTANCE);
+  }
+
+  private syncStudioHook() {
+    const s = this.studio;
+    window.__coastStudio = {
+      actorId: this.identity.id,
+      setSize: s?.set.size ?? 0,
+      ghosts: s?.ghostsVisible ?? 0,
+      state: s?.state ?? 'none',
+      possessed: this.possessions,
+    };
+  }
+
   private syncNpcHook() {
+    this.syncStudioHook();
     const p = this.npcs?.byId('photographer');
     window.__coastNpcs = {
       count: this.npcs?.npcs.length ?? 0,
@@ -1471,6 +1560,7 @@ export class Game {
       yaw: car ? car.yaw : ch.yaw,
       speed: car ? Math.abs(car.speed) : ch.speed,
       grounded: car ? car.wheelsOnGround >= 2 : ch.grounded,
+      driving: !!car,
       camera: this.camera,
       cameraHeightM: camH,
       subjectInFrame: this.subjectInFrame(subject),
@@ -1513,13 +1603,18 @@ export class Game {
         this.rig.mode === 'actor' ? 'hold click = spray the wall · Z undo · E drop · F throw' : 'click = spray · Z undo · E drop · F throw';
     else if (p?.grabbed) this.hint = 'E drop · F / click throw';
     else if (p?.selected) this.hint = 'click the ground = put it there · Esc cancel · Z undo';
-    else if (this.studio?.state === 'recording') this.hint = '● recording — Enter to cut';
+    else if (this.studio?.state === 'recording')
+      this.hint = `● recording ${this.identity.name}${this.studio.ghostsVisible ? ` with ${this.studio.ghostsVisible} replay${this.studio.ghostsVisible > 1 ? 's' : ''}` : ''} — Enter to cut`;
+    else if (this.studio?.state === 'verdict' && this.studio.set.size > 0)
+      this.hint = `P replay the set (${this.studio.set.size} take${this.studio.set.size > 1 ? 's' : ''}) · V near an NPC = play their part next take · Enter = take ${this.studio.takesUsed + 1}`;
     else if (this.studio?.state === 'briefed')
       this.hint =
         this.studio.mission.id === 'm02-hop-on-the-one'
           ? 'Enter = action · get in the lowrider (E) · hop (Space) on the beat · keep the car in frame' + beat
           : 'Enter = action · get low (drag the camera down) · keep the crate in frame · T for golden hour';
     else if (this.vehicleDistance() < ENTER_DISTANCE) this.hint = 'E = get in the lowrider' + beat;
+    else if (this.npcNearby())
+      this.hint = `V = be ${this.npcNearby()!.spec.name}${this.identity.id !== PLAYER_IDENTITY.id ? ` (you are ${this.identity.name})` : ''}`;
     else if (this.rig.mode === 'actor')
       this.hint =
         'click to lock the mouse · WASD · Space jump · Shift sprint · E grab / get in the car · click a prop then the ground = put that there';

@@ -86,5 +86,15 @@ test('physics smoke: rapier + character controller step without errors', async (
   await page.waitForFunction(() => (window.__coastNpcs?.count ?? 0) >= 4 && window.__coastNpcs?.nav === true, null, { timeout: 60_000 });
   await page.waitForFunction(() => (window.__coastNpcs?.greets ?? 0) >= 1, null, { timeout: 90_000 });
   await expect(page.locator('#coast-sub')).toContainText(/Photographer/i);
+  // Possession (ACT-3): V swaps bodies with the Photographer (she is within reach after her greeting); V again, next to
+  // the body that now carries $COAST, switches back.
+  await page.keyboard.press('KeyV');
+  await page.waitForFunction(() => window.__coastStudio?.actorId === 'photographer', null, { timeout: 30_000 });
+  await expect(page.locator('#coast-sub')).toContainText(/Photographer now/i);
+  expect(await page.evaluate(() => window.__coastNpcs?.photographer)).toBeNull(); // the identity left the crowd
+  await page.keyboard.press('KeyV');
+  await page.waitForFunction(() => window.__coastStudio?.actorId === 'player' && window.__coastStudio.possessed === 2, null, {
+    timeout: 30_000,
+  });
   expect(errors, errors.join('\n')).toHaveLength(0);
 });

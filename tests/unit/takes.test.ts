@@ -18,7 +18,7 @@ import {
 const T0 = 1000; // arbitrary clock origin (ms) — nothing should depend on it
 
 function input(i = 0, over: Partial<Omit<TakeSample, 't'>> = {}): Omit<TakeSample, 't'> {
-  return { pos: [i, 0, -i], yaw: 0, speed: 1, grounded: true, camPos: [0, 1.6, 2], camQuat: [0, 0, 0, 1], ...over };
+  return { pos: [i, 0, -i], yaw: 0, speed: 1, grounded: true, driving: false, camPos: [0, 1.6, 2], camQuat: [0, 0, 0, 1], ...over };
 }
 
 function rotY(deg: number): Quat {
@@ -66,7 +66,7 @@ function take(samples: TakeSample[], worldEdits: WorldEdit[] = [], durationS = s
 }
 
 function sampleAt(t: number, over: Partial<TakeSample> = {}): TakeSample {
-  return { t, pos: [0, 0, 0], yaw: 0, speed: 0, grounded: true, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1], ...over };
+  return { t, pos: [0, 0, 0], yaw: 0, speed: 0, grounded: true, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1], ...over };
 }
 
 // ── TakeRecorder ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -321,7 +321,7 @@ describe('TakePlayer', () => {
   it('replays an empty take as the origin / identity and a single-sample take as that sample', () => {
     const empty = new TakePlayer(take([], [], 2));
     expect(empty.durationS).toBe(2);
-    expect(empty.poseAt(1)).toEqual({ pos: [0, 0, 0], yaw: 0, speed: 0, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] });
+    expect(empty.poseAt(1)).toEqual({ pos: [0, 0, 0], yaw: 0, speed: 0, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] });
     const one = new TakePlayer(take([sampleAt(0.5, { pos: [1, 2, 3], yaw: 1, speed: 3, camQuat: rotY(30) })]));
     expect(one.poseAt(0)).toMatchObject({ pos: [1, 2, 3], yaw: 1, speed: 3 });
     expect(one.poseAt(9)).toMatchObject({ pos: [1, 2, 3], camQuat: rotY(30) });
@@ -393,6 +393,7 @@ describe('encodeTake / decodeTake', () => {
         yaw: rand() * Math.PI,
         speed: Math.abs(rand()) * 12,
         grounded: rand() > 0,
+        driving: rand() > 0.5,
         camPos: [rand() * 15, rand() * 15, rand() * 15],
         camQuat: q.map((v) => v / len) as Quat,
       });
@@ -442,6 +443,37 @@ describe('encodeTake / decodeTake', () => {
     const big = new Uint8Array(bytes.length + 7);
     big.set(bytes, 3);
     expect(decodeTake(big.subarray(3, 3 + bytes.length))).toEqual(t);
+  });
+
+  it('packs driving into the flags byte next to grounded, and reads files written before the bit existed', () => {
+    const t = take([sampleAt(0, { driving: true, grounded: false }), sampleAt(1, { driving: true }), sampleAt(2)]);
+    const bytes = encodeTake(t);
+    const flags = bytes.subarray(bytes.length - 3);
+    expect([...flags]).toEqual([2, 3, 1]); // bit0 grounded, bit1 driving
+    expect(decodeTake(bytes)).toEqual(t);
+    // Legacy: a body whose flags column is the old u8 grounded (0 / 1) decodes with driving = false everywhere.
+    flags[0] = 0;
+    flags[1] = 1;
+    const legacy = decodeTake(bytes);
+    expect(legacy.samples.map((x) => x.driving)).toEqual([false, false, false]);
+    expect(legacy.samples.map((x) => x.grounded)).toEqual([false, true, true]);
+  });
+});
+
+describe('TakeRecorder actor id (ACT-3 possession)', () => {
+  it('start(nowMs, actorId) tags the take with who performed it; the previous id sticks until changed', () => {
+    const rec = new TakeRecorder({ actorId: 'player', cellVersion: 'v', idFactory: () => 'x' });
+    rec.start(T0, 'photographer');
+    rec.sample(T0, input(0, { driving: true }));
+    const a = rec.stop(T0 + 100);
+    expect(a.actorId).toBe('photographer');
+    expect(a.samples[0]!.driving).toBe(true);
+    rec.start(T0 + 200);
+    rec.sample(T0 + 200, input(1));
+    expect(rec.stop(T0 + 300).actorId).toBe('photographer');
+    rec.start(T0 + 400, 'player');
+    rec.sample(T0 + 400, input(2));
+    expect(rec.stop(T0 + 500).actorId).toBe('player');
   });
 });
 

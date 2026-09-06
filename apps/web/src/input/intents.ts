@@ -24,7 +24,8 @@ export interface FrameInput {
   debugToggle: boolean; // edge
   resetEdge: boolean; // edge
   action: boolean; // edge — Enter / ACTION button: roll or cut a take
-  playback: boolean; // edge — P: replay the last take
+  playback: boolean; // edge — P: replay the set (this mission's takes)
+  possess: boolean; // edge — V / Back: possess the nearest NPC (or the body that carries you, to switch back)
   /** Hydraulic switchbox, held: x = −1 left side up … +1 right side up; y = +1 front up … −1 back up (I/J/K/L, d-pad). */
   hydro: THREE.Vector2;
   beatToggle: boolean; // edge — H / BEAT: hop on the beat grid (auto-hydraulics + metronome)
@@ -63,6 +64,7 @@ export function newFrameInput(): FrameInput {
     resetEdge: false,
     action: false,
     playback: false,
+    possess: false,
     hydro: new THREE.Vector2(),
     beatToggle: false,
     muteToggle: false,
@@ -94,6 +96,7 @@ export function resetFrameInput(f: FrameInput) {
     f.resetEdge =
     f.action =
     f.playback =
+    f.possess =
     f.beatToggle =
     f.muteToggle =
       false;

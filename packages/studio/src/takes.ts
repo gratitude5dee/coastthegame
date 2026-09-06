@@ -27,6 +27,8 @@ export interface TakeSample {
   /** Horizontal speed, m/s (drives the locomotion blend on replay). */
   speed: number;
   grounded: boolean;
+  /** The actor was at the wheel of the lowrider (the pose is the car's; replay shows a car, not a body). */
+  driving: boolean;
   camPos: Vec3;
   camQuat: Quat;
 }
@@ -69,6 +71,8 @@ export interface TakePose {
   /** Radians, wrapped to [-π, π]. */
   yaw: number;
   speed: number;
+  /** From the sample at or before the time (never interpolated). */
+  driving: boolean;
   camPos: Vec3;
   camQuat: Quat;
 }
@@ -160,6 +164,7 @@ function copySample(dst: TakeSample, t: number, s: Omit<TakeSample, 't'>): TakeS
   dst.yaw = f32(s.yaw);
   dst.speed = f32(s.speed);
   dst.grounded = !!s.grounded;
+  dst.driving = !!s.driving;
   dst.camPos[0] = f32(s.camPos[0]);
   dst.camPos[1] = f32(s.camPos[1]);
   dst.camPos[2] = f32(s.camPos[2]);
@@ -171,7 +176,7 @@ function copySample(dst: TakeSample, t: number, s: Omit<TakeSample, 't'>): TakeS
 }
 
 function emptySample(): TakeSample {
-  return { t: 0, pos: [0, 0, 0], yaw: 0, speed: 0, grounded: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
+  return { t: 0, pos: [0, 0, 0], yaw: 0, speed: 0, grounded: false, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
 }
 
 function cloneEdit(t: number, e: WorldEditInput): WorldEdit {
@@ -202,7 +207,8 @@ function cloneEdit(t: number, e: WorldEditInput): WorldEdit {
  */
 export class TakeRecorder {
   readonly hz: number;
-  private readonly actorId: string;
+  /** Who is performing; `start()` can set it per take (possession, ACT-3). */
+  actorId: string;
   private readonly cellVersion: string;
   private readonly idFactory: () => string;
   private readonly periodMs: number;
@@ -232,7 +238,8 @@ export class TakeRecorder {
   }
 
   /** Begin a new take at `nowMs` (any monotonic clock, e.g. `performance.now()`); resets the buffers. */
-  start(nowMs: number): void {
+  start(nowMs: number, actorId?: string): void {
+    if (actorId !== undefined) this.actorId = actorId;
     this.isRecording = true;
     this.id = this.idFactory();
     this.startMs = nowMs;
@@ -305,6 +312,7 @@ function copyPose(s: TakeSample, o: TakePose): TakePose {
   o.pos[2] = s.pos[2];
   o.yaw = wrapAngle(s.yaw);
   o.speed = s.speed;
+  o.driving = !!s.driving;
   o.camPos[0] = s.camPos[0];
   o.camPos[1] = s.camPos[1];
   o.camPos[2] = s.camPos[2];
@@ -337,7 +345,7 @@ export class TakePlayer {
    * Writes into `out` when given (allocation-free) and returns it; an empty take yields the origin / identity.
    */
   poseAt(tS: number, out?: TakePose): TakePose {
-    const o = out ?? { pos: [0, 0, 0], yaw: 0, speed: 0, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
+    const o = out ?? { pos: [0, 0, 0], yaw: 0, speed: 0, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
     const s = this.samples;
     const n = s.length;
     if (n === 0) return copyPose(emptySample(), o);
@@ -355,6 +363,7 @@ export class TakePlayer {
     o.pos[2] = lerp(a.pos[2], b.pos[2], u);
     o.yaw = lerpAngle(a.yaw, b.yaw, u);
     o.speed = lerp(a.speed, b.speed, u);
+    o.driving = !!a.driving;
     o.camPos[0] = lerp(a.camPos[0], b.camPos[0], u);
     o.camPos[1] = lerp(a.camPos[1], b.camPos[1], u);
     o.camPos[2] = lerp(a.camPos[2], b.camPos[2], u);
@@ -403,14 +412,15 @@ export class TakePlayer {
 /**
  * take.bin v1: `"TAKE"` · u32 header length · JSON header · packed body. The header is the take minus its samples plus
  * `n` and a human-readable `body` layout string (the SCH-4 style); the body is column-major little-endian float32 columns
- * (t, pos xyz, yaw, speed, camPos xyz, camQuat xyzw) followed by a uint8 grounded column — 53 bytes per sample, so a
- * 60 s take at 30 Hz is ≈ 95 KB. Column-major keeps it friendly to gzip / R2 content-encoding.
+ * (t, pos xyz, yaw, speed, camPos xyz, camQuat xyzw) followed by a uint8 flags column (bit 0 grounded, bit 1 driving —
+ * files written before the driving bit existed decode unchanged) — 53 bytes per sample, so a 60 s take at 30 Hz is
+ * ≈ 95 KB. Column-major keeps it friendly to gzip / R2 content-encoding.
  */
 const MAGIC = [0x54, 0x41, 0x4b, 0x45] as const; // "TAKE"
 const HEADER_PREFIX_BYTES = 8; // magic + u32 header length
 export const TAKE_BYTES_PER_SAMPLE = 4 + 12 + 4 + 4 + 12 + 16 + 1;
 const BODY_LAYOUT =
-  'f32 t[n] | f32x3 pos[n] | f32 yaw[n] | f32 speed[n] | f32x3 camPos[n] | f32x4 camQuat[n] | u8 grounded[n]; little-endian, column-major';
+  'f32 t[n] | f32x3 pos[n] | f32 yaw[n] | f32 speed[n] | f32x3 camPos[n] | f32x4 camQuat[n] | u8 flags[n] (bit0 grounded, bit1 driving); little-endian, column-major';
 
 interface TakeHeader extends Omit<TakeV1, 'samples'> {
   n: number;
@@ -462,7 +472,7 @@ export function encodeTake(take: TakeV1): Uint8Array {
     put(s.camQuat[2]);
     put(s.camQuat[3]);
   }
-  for (const s of samples) bytes[o++] = s.grounded ? 1 : 0;
+  for (const s of samples) bytes[o++] = (s.grounded ? 1 : 0) | (s.driving ? 2 : 0);
   return bytes;
 }
 
@@ -513,7 +523,11 @@ export function decodeTake(bytes: Uint8Array): TakeV1 {
     s.camQuat[2] = get();
     s.camQuat[3] = get();
   }
-  for (const s of samples) s.grounded = bytes[o++] === 1;
+  for (const s of samples) {
+    const flags = bytes[o++]!;
+    s.grounded = (flags & 1) === 1;
+    s.driving = (flags & 2) === 2;
+  }
   return {
     v: 1,
     id: String(header.id ?? ''),

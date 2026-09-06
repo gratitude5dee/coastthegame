@@ -22,6 +22,8 @@ export interface NpcBrainOptions {
   greetHold?: number;
   /** Whether this NPC walks up to the player (the tutor does; extras only greet in passing). */
   approaches?: boolean;
+  /** Seconds before the first greeting is allowed (default 0: greet as soon as the player is close). */
+  greetDelay?: number;
   /** Deterministic randomness for tests. */
   random?: () => number;
 }
@@ -49,9 +51,11 @@ export class NpcBrain {
       greetCooldown: opts.greetCooldown ?? 25,
       greetHold: opts.greetHold ?? 4,
       approaches: opts.approaches ?? false,
+      greetDelay: opts.greetDelay ?? 0,
       random: opts.random ?? Math.random,
     };
     this.timer = this.pause();
+    this.sinceGreet = this.opts.greetDelay > 0 ? this.opts.greetCooldown - this.opts.greetDelay : Infinity;
   }
 
   /**

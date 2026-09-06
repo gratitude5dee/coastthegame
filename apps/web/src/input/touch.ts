@@ -35,7 +35,7 @@ export class TouchProvider implements InputProvider {
         <div id="stick-knob" style="position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,181,74,.6)"></div>
       </div>
       <div id="touch-buttons" style="position:absolute;right:20px;bottom:100px;display:flex;flex-direction:column;gap:12px;pointer-events:auto">
-        ${btn('action', 'ACTION')}${btn('jump', 'JUMP')}${btn('grab', 'GRAB')}${btn('mode', 'MODE')}
+        ${btn('action', 'ACTION')}${btn('jump', 'JUMP')}${btn('grab', 'GRAB')}${btn('mode', 'MODE')}${btn('possess', 'BE')}
       </div>
       <div id="touch-drive" style="position:absolute;right:96px;bottom:100px;display:none;flex-direction:column;gap:12px;pointer-events:auto">
         ${btn('lift', 'LIFT')}${btn('beat', 'BEAT')}
@@ -50,6 +50,7 @@ export class TouchProvider implements InputProvider {
       ['grab', 'interact'],
       ['mode', 'modeCycle'],
       ['beat', 'beatToggle'],
+      ['possess', 'possess'],
     ] as const) {
       this.root.querySelector(`#btn-${id}`)!.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -102,6 +103,7 @@ export class TouchProvider implements InputProvider {
     if (this.edges.has('modeCycle')) out.modeCycle = true;
     if (this.edges.has('action')) out.action = true;
     if (this.edges.has('beatToggle')) out.beatToggle = true;
+    if (this.edges.has('possess')) out.possess = true;
     this.edges.clear();
   }
 

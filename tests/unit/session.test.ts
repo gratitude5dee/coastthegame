@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import { StudioSession, type FrameContext } from '../../apps/web/src/studio/session';
+import { GhostActor } from '../../apps/web/src/studio/ghosts';
 import { MISSIONS_V0 } from '../../packages/studio/src/missions';
 
 /**
@@ -85,6 +86,68 @@ describe('StudioSession mission loop', () => {
     expect((await shoot(s, 40_000, 1.5, bad)).stars).toBe(0);
     expect(s.canRoll).toBe(false); // 3 of 3 used
     expect(s.leave().id).toBe(MISSIONS_V0[1]!.id); // out of takes → next mission anyway
+  });
+
+  it('multi-take blocking: take 2 rolls with take 1 performing as a ghost, the set loops after the cut and resets per mission', async () => {
+    const looks: string[] = [];
+    const scene = new THREE.Scene();
+    const s = new StudioSession(
+      document.body,
+      scene,
+      new THREE.Group(),
+      document.createElement('canvas'),
+      'test-cell',
+      MISSIONS_V0,
+      0,
+      (actorId) => {
+        looks.push(actorId);
+        return new GhostActor(scene, new THREE.Group(), null, { color: 0xffffff, name: actorId });
+      },
+    );
+    s.brief();
+    const bad = { cameraHeightM: 1.8, subjectInFrame: false, timePreset: 'noon' as const };
+    // Take 1 as $COAST: walk 6 m in 2 s.
+    expect(s.action(ctx(1000, bad))).toBe('rolled');
+    expect(s.ghostsVisible).toBe(0); // nothing to replay yet
+    for (let i = 1; i <= 60; i++) s.tick(ctx(1000 + (i * 1000) / 30, { ...bad, feet: new THREE.Vector3(i * 0.1, 0, 0) }));
+    expect(s.action(ctx(3000, bad))).toBe('cut');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.set.size).toBe(1);
+    expect(s.set.layers[0]!.take.actorId).toBe('player');
+    expect(looks).toEqual(['player']);
+    expect(s.playing).toBe(true); // the set loops after the cut
+    expect(s.ghostsVisible).toBe(1);
+    // Take 2, possessing the Photographer: take 1 performs again on the take clock while this one rolls.
+    s.retake();
+    s.actorId = 'photographer';
+    expect(s.action(ctx(10_000, bad))).toBe('rolled');
+    expect(s.playing).toBe(true);
+    expect(s.ghostsVisible).toBe(1);
+    s.tick(ctx(11_000, bad)); // 1 s into take 2 = 1 s into the replay of take 1 → 3 m along
+    expect(s.ghosts[0]!.group.position.x).toBeCloseTo(3, 1);
+    s.tick(ctx(14_000, bad)); // past take 1's 2 s: the ghost holds its mark
+    expect(s.ghosts[0]!.group.position.x).toBeCloseTo(6, 1);
+    expect(s.action(ctx(14_500, bad))).toBe('cut');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.set.layers.map((l) => l.take.actorId)).toEqual(['player', 'photographer']);
+    expect(looks).toEqual(['player', 'photographer']);
+    expect(s.ghostsVisible).toBe(2);
+    // P toggles the looping playback of the whole set.
+    s.togglePlayback(15_000);
+    expect(s.ghostsVisible).toBe(0);
+    s.togglePlayback(15_100);
+    expect(s.ghostsVisible).toBe(2);
+    // A third take fills the set; walking off after the mission is done clears it (a new shot, a fresh set).
+    s.retake();
+    expect(s.action(ctx(20_000, bad))).toBe('rolled');
+    s.tick(ctx(20_100, bad));
+    expect(s.action(ctx(20_500, bad))).toBe('cut');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.set.size).toBe(3);
+    expect(s.leave().id).toBe(MISSIONS_V0[1]!.id); // out of takes → next mission
+    expect(s.set.size).toBe(0);
+    expect(s.ghosts.length).toBe(0);
+    expect(s.playing).toBe(false);
   });
 
   it('mission 2 judges manual hops against the beat from the frame context', async () => {

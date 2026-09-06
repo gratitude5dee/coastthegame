@@ -66,6 +66,7 @@ export class KeyboardMouseProvider implements InputProvider {
     out.resetEdge = out.resetEdge || this.edges.has('KeyR');
     out.action = out.action || this.edges.has('Enter') || this.edges.has('NumpadEnter');
     out.playback = out.playback || this.edges.has('KeyP');
+    out.possess = out.possess || this.edges.has('KeyV');
     out.beatToggle = out.beatToggle || this.edges.has('KeyH');
     out.muteToggle = out.muteToggle || this.edges.has('KeyM');
     // Hydraulic switchbox (held): I front, K back, J left, L right.

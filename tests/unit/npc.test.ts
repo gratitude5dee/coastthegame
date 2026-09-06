@@ -84,3 +84,63 @@ describe('NpcNav (Recast + Detour crowd)', () => {
     nav.dispose();
   });
 });
+
+describe('NpcBrain greetDelay', () => {
+  it('holds the first greeting back for the delay, then greets on the cooldown as usual', () => {
+    const b = new NpcBrain({ home: [0, 0, 0], greetDelay: 10, greetCooldown: 25, random: () => 0.5 });
+    const near: [number, number, number] = [1, 0, 0];
+    expect(b.update([0, 0, 0], near, 1, true).some((e) => e.kind === 'greet')).toBe(false);
+    expect(b.update([0, 0, 0], near, 8, true).some((e) => e.kind === 'greet')).toBe(false); // 9 s: still held
+    expect(b.update([0, 0, 0], near, 1.5, true).some((e) => e.kind === 'greet')).toBe(true); // 10.5 s: greets
+    const plain = new NpcBrain({ home: [0, 0, 0], random: () => 0.5 });
+    expect(plain.update([0, 0, 0], near, 0.016, true).some((e) => e.kind === 'greet')).toBe(true); // no delay: at once
+  });
+});
+
+describe('NpcSystem possession (ACT-3)', () => {
+  it('swaps identity and place with the nearest NPC, and swapping again next to that body switches back', async () => {
+    const { loadRapier, PhysicsWorld } = await import('../../packages/engine/src/physics/world');
+    const { NpcSystem } = await import('../../apps/web/src/npc/npcs');
+    const R = await loadRapier();
+    const physics = new PhysicsWorld(R);
+    const world = new THREE.Group();
+    const npcs = new NpcSystem(physics, world, null, {}, () => 0.5);
+    const photographer = npcs.spawn({
+      id: 'photographer',
+      name: 'Photographer',
+      color: 0x4fa3d9,
+      home: new THREE.Vector3(2, 0, 0),
+      lines: ['hi'],
+      approaches: true,
+    });
+    npcs.spawn({ id: 'npc_a', name: 'Rico', color: 0xd9a03a, home: new THREE.Vector3(9, 0, 0), lines: ['yo'] });
+    const feet = new THREE.Vector3(0, 0, 0);
+    expect(npcs.nearest(feet, 3.2)?.spec.id).toBe('photographer');
+    expect(npcs.nearest(new THREE.Vector3(30, 0, 0), 3.2)).toBeNull();
+
+    const me = { id: 'player', name: '$COAST', color: 0xffb54a, home: new THREE.Vector3(), lines: [], approaches: false };
+    const was = npcs.swapIdentity(photographer, me, feet, 1.2);
+    // I am the Photographer now, standing where she stood …
+    expect(was.spec.id).toBe('photographer');
+    expect(was.position.x).toBeCloseTo(2);
+    // … and the NPC entity carries on as $COAST from where I stood, facing my way, with a fresh brain that does not tutor.
+    expect(photographer.spec.id).toBe('player');
+    expect(photographer.spec.name).toBe('$COAST');
+    expect(photographer.capsule.material.color.getHex()).toBe(0xffb54a);
+    expect(photographer.mesh.position.x).toBeCloseTo(0);
+    expect(photographer.mesh.rotation.y).toBeCloseTo(1.2);
+    expect(photographer.brain.opts.approaches).toBe(false);
+    expect(photographer.brain.opts.home[0]).toBeCloseTo(0);
+    expect(photographer.body.translation().x).toBeCloseTo(0);
+    expect(npcs.byId('photographer')).toBeUndefined(); // the identity left the crowd
+    expect(npcs.byId('player')).toBe(photographer);
+
+    // Switch back: possess the body that carries $COAST.
+    const back = npcs.swapIdentity(npcs.nearest(was.position, 3.2)!, was.spec, was.position, 0);
+    expect(back.spec.id).toBe('player');
+    expect(npcs.byId('photographer')).toBe(photographer);
+    expect(photographer.brain.opts.approaches).toBe(true);
+    expect(photographer.mesh.position.x).toBeCloseTo(2);
+    npcs.dispose();
+  }, 30_000);
+});

@@ -11,6 +11,7 @@ const frame = () => (window as unknown as { __coastFrame?: number }).__coastFram
 // Vertical-slice loop (goal.md §3.1 steps 4–6 / M3.5): mission briefed → Enter rolls (MediaRecorder + TakeRecorder) →
 // Enter cuts → verdict with ★, hints and a downloadable clip; the take replays as a ghost.
 test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
+  test.slow(); // two clips on software GL: the second one crawls (see below)
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -33,6 +34,30 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   const download = page.locator('.mc-actions a[download]');
   await expect(download).toHaveCount(1, { timeout: 15_000 });
   expect(await download.getAttribute('href')).toMatch(/^blob:/);
+  // Multi-take blocking (ACT-2): the take joined the set and loops as a ghost; take 2 rolls with it performing.
+  type S = NonNullable<Window['__coastStudio']>;
+  await page.waitForFunction(
+    () =>
+      (window as unknown as { __coastStudio?: S }).__coastStudio?.setSize === 1 &&
+      (window as unknown as { __coastStudio?: S }).__coastStudio?.ghosts === 1,
+    null,
+    { timeout: 15_000 },
+  );
+  await page.locator('.mc-actions button', { hasText: /take/i }).first().click(); // retake
+  await expect(page.locator('.mc-state')).toContainText(/Take 2/i);
+  await page.keyboard.press('Enter'); // roll take 2
+  // Take 1 performs again (a ghost on the take clock) while take 2 rolls. A second capture crawls on software GL (the
+  // encoder starves the 2-core renderer: a frame every ~15 s), so from here the waits are generous and frame-free.
+  await page.waitForFunction(
+    () =>
+      (window as unknown as { __coastStudio?: S }).__coastStudio?.state === 'recording' &&
+      (window as unknown as { __coastStudio?: S }).__coastStudio?.ghosts === 1,
+    null,
+    { timeout: 60_000 },
+  );
+  await page.keyboard.press('Enter'); // cut
+  await page.waitForSelector('.mc-verdict', { timeout: 120_000 });
+  await page.waitForFunction(() => (window as unknown as { __coastStudio?: S }).__coastStudio?.setSize === 2, null, { timeout: 60_000 });
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 
