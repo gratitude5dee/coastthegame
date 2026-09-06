@@ -125,6 +125,7 @@ declare global {
     __coastSteps?: number;
     __coastPhysics?: boolean;
     __coastVehicle?: { driving: boolean; speed: number; pos: [number, number, number]; hops: number; wheels: number; autoHop: boolean };
+    __coastGame?: unknown;
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -222,6 +223,7 @@ export class Game {
     });
     this.scene.add(this.spark);
     performance.mark('coast:boot');
+    window.__coastGame = this; // harness / console handle (read-only by convention)
 
     // Lights for meshes (splats are unlit); env map from the cell pano lands with M2 (W-5).
     this.scene.add(new THREE.HemisphereLight(0xfff1dc, 0x24303f, 1.1));
