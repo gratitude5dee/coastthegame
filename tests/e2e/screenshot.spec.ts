@@ -29,5 +29,8 @@ for (const shot of SHOTS) {
     expect(errors, errors.join('\n')).toHaveLength(0);
     const hud = await page.locator('#hud').innerText();
     expect(hud).toContain('tier desktop');
+    // Guard against a silently empty frame (e.g. Spark auto-detection broken by `fileType: undefined`).
+    const rendered = Number((hud.match(/splats ([\d,]+)/)?.[1] ?? '0').replace(/,/g, ''));
+    expect(rendered).toBeGreaterThan(1000);
   });
 }
