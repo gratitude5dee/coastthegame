@@ -82,4 +82,9 @@ test('physics smoke: rapier + character controller step without errors', async (
   expect(ground?.sampled ?? 0).toBeGreaterThan(0);
   // Loading choreography (UX-3): the title card wipes away once fetch + detail + physics are in — never a stuck screen.
   await expect(page.locator('#coast-load')).toBeHidden({ timeout: 60_000 });
+  // NPCs (PHY-4): the navmesh bakes from the ground grid, the Photographer walks up and says her line (subtitle).
+  await page.waitForFunction(() => (window.__coastNpcs?.count ?? 0) >= 4 && window.__coastNpcs?.nav === true, null, { timeout: 60_000 });
+  await page.waitForFunction(() => (window.__coastNpcs?.greets ?? 0) >= 1, null, { timeout: 90_000 });
+  await expect(page.locator('#coast-sub')).toContainText(/Photographer/i);
+  expect(errors, errors.join('\n')).toHaveLength(0);
 });

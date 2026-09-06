@@ -62,6 +62,9 @@ importers:
       iwer:
         specifier: 2.3.0
         version: 2.3.0
+      recast-navigation:
+        specifier: 0.43.1
+        version: 0.43.1
       three:
         specifier: 0.180.0
         version: 0.180.0
@@ -94,9 +97,12 @@ importers:
       '@sparkjsdev/spark':
         specifier: 2.1.0
         version: 2.1.0(three@0.180.0)
+      recast-navigation:
+        specifier: 0.43.1
+        version: 0.43.1
       three:
         specifier: 0.180.0
-        version: 0.180.0
+        version: 0.184.0
     devDependencies:
       '@types/three':
         specifier: 0.180.0
@@ -1058,6 +1064,15 @@ packages:
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
 
+  '@recast-navigation/core@0.43.1':
+    resolution: {integrity: sha512-4igfPgnoV90O92sDSIA0xHa6tanh3z/udlgGmD0SqGQ6PKV4JS2l9jWO8YnxfZuXP/NV52H4c5FU6pSdZc9WDA==}
+
+  '@recast-navigation/generators@0.43.1':
+    resolution: {integrity: sha512-w7r6k/A93wWxuSN+Lg+PmlsUVXq06r5bqXmBglolxqDt2O/Y776BIhYtb6P2P6pbYqDWORu9NCZZJzfY4FNpaA==}
+
+  '@recast-navigation/wasm@0.43.1':
+    resolution: {integrity: sha512-XFL6PhO8JodwXUHBSAkfaLUdUEweIkJsdP3HTmtJvMs5fkqEWxWJmBskZlACHJepv55NAriqWxOtuLlG3t7+Hg==}
+
   '@rollup/rollup-android-arm-eabi@4.63.1':
     resolution: {integrity: sha512-UZ8sUxPTiHWYX9QNdJedb1kDZSpS1t/VPWBWGSgqHNi9w3Cu6IXvu2mzbhiTiPvtrqgTQJ+zqiAq2iPIPilpaQ==}
     cpu: [arm]
@@ -1696,6 +1711,9 @@ packages:
   react@19.2.8:
     resolution: {integrity: sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==}
     engines: {node: '>=0.10.0'}
+
+  recast-navigation@0.43.1:
+    resolution: {integrity: sha512-BVBQEHE6uqD36opJomVkI5TxMVZ8bBLdDn90mYtBUYJnNlqEuNFOL8DH8lLOksfVVaC+kjykYuS57P6MrxVB7A==}
 
   rollup@4.63.1:
     resolution: {integrity: sha512-3Df9jsstwhccuEfmAMi9l8XUh/GOkVObmFTU7CCVBysEbcOZLl84jCtaAZMcPiMz2EGKsATzQcU+Xr3n/wU6cg==}
@@ -2606,6 +2624,17 @@ snapshots:
 
   '@poppinss/exception@1.2.3': {}
 
+  '@recast-navigation/core@0.43.1':
+    dependencies:
+      '@recast-navigation/wasm': 0.43.1
+
+  '@recast-navigation/generators@0.43.1':
+    dependencies:
+      '@recast-navigation/core': 0.43.1
+      '@recast-navigation/wasm': 0.43.1
+
+  '@recast-navigation/wasm@0.43.1': {}
+
   '@rollup/rollup-android-arm-eabi@4.63.1':
     optional: true
 
@@ -3305,6 +3334,11 @@ snapshots:
       scheduler: 0.27.0
 
   react@19.2.8: {}
+
+  recast-navigation@0.43.1:
+    dependencies:
+      '@recast-navigation/core': 0.43.1
+      '@recast-navigation/generators': 0.43.1
 
   rollup@4.63.1:
     dependencies:

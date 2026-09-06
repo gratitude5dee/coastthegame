@@ -45,7 +45,7 @@ Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints 
 | Grab / drop · throw                            | E · F                                                                                                  | GRAB · tap              | X · B           |
 | Spray paint (holding a can)                    | click = puff · hold in actor mode = stroke · Z undo                                                    | tap                     | trigger         |
 | Put that there                                 | click a prop, then click the ground · Z undo                                                           | tap, tap                | — (voice in M5) |
-| Talk to the Photographer → mission             | walk up to the blue NPC                                                                                | same                    | same            |
+| Talk to the Photographer → mission             | she walks up to you (blue NPC); the extras greet in passing — subtitles at the bottom                  | same                    | same            |
 | Action / cut a take · replay                   | Enter · P                                                                                              | ACTION                  | Start           |
 | Lowrider: get in / out                         | E next to it                                                                                           | GRAB→EXIT               | X               |
 | Drive · handbrake · hop                        | WASD · Shift · Space (Shift+Space = all four)                                                          | stick · HOP             | sticks · LB · A |
@@ -59,4 +59,4 @@ No headset? `?xrsim=1` on the dev server boots an emulated Quest 3 with an on-sc
 
 ## Status
 
-Milestone **M3 — actor mode** on sample worlds (see `docs/tasks.md`): Rapier physics with splat-derived ground, the character, props with put-that-there, the **lowrider** (raycast vehicle + hydraulics + beat grid), the camera rig, and the **M3.5 vertical slice** (missions → takes → verdict → billboard/download). Marble cells (M2) wire in as soon as a World Labs key lands in `.env`.
+Milestone **M3 — actor mode** on sample worlds (see `docs/tasks.md`): Rapier physics with splat-derived ground, the character, props with put-that-there, the **lowrider** (raycast vehicle + hydraulics + beat grid), **NPCs on a runtime navmesh** (Recast/Detour crowd, loiter · approach · greet), the camera rig, and the **M3.5 vertical slice** (missions → takes → verdict → billboard/download). Marble cells (M2) wire in as soon as a World Labs key lands in `.env`.

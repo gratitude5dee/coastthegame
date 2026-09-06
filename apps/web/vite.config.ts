@@ -16,6 +16,9 @@ function manualChunks(id: string): string | undefined {
 
 export default defineConfig({
   server: { port: 5173 },
+  // One three, ever: @iwer/devui (the ?xrsim=1 puppeteering panel, dev only) declares its own newer three, which
+  // would load a second copy next to ours ("Multiple instances of Three.js" + instanceof checks failing across them).
+  resolve: { dedupe: ['three'] },
   // Inline PostCSS config: stops Vite from walking up to a stray ~/postcss.config.js on dev machines.
   css: { postcss: {} },
   esbuild: { target: 'es2022' },

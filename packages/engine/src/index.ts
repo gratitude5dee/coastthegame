@@ -12,3 +12,5 @@ export * from './vehicles/lowrider';
 export * from './xr/locomotion';
 export * from './world/paint';
 export * from './audio/stride';
+export * from './npc/brain';
+export * from './npc/crowd';

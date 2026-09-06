@@ -45,6 +45,8 @@ import { initPerf } from './perf';
 import { StudioSession } from './studio/session';
 import { Metronome } from './audio/metronome';
 import { Sfx } from './audio/sfx';
+import { NpcSystem } from './npc/npcs';
+import { createSubtitles, type Subtitles } from './ui/subtitles';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
 
 export interface SceneDef {
@@ -141,6 +143,7 @@ declare global {
     __coastXrSupported?: boolean;
     __coastDiorama?: boolean;
     __coastPaint?: { count: number; strokes: number };
+    __coastNpcs?: { count: number; nav: boolean; greets: number; photographer: [number, number, number] | null };
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -232,7 +235,8 @@ export class Game {
   private readyFrames = 0;
   private hint = '';
   private studio: StudioSession | null = null;
-  private photographer: THREE.Group | null = null;
+  private npcs: NpcSystem | null = null;
+  private subtitles: Subtitles | null = null;
   private billboard: THREE.Mesh | null = null;
   private billboardVideo: HTMLVideoElement | null = null;
   private readonly frustum = new THREE.Frustum();
@@ -407,8 +411,8 @@ export class Game {
     this.physics?.dispose();
     this.physics = null;
     this.playerMesh.visible = false;
-    if (this.photographer) this.world.remove(this.photographer);
-    this.photographer = null;
+    this.npcs?.dispose();
+    this.npcs = null;
     if (this.billboard) this.world.remove(this.billboard);
     this.billboard = null;
     if (this.studio) {
@@ -838,24 +842,55 @@ export class Game {
     return this.vehicle!.position(out).sub(this.tmpV2.set(0, CAR_FEET_DROP, 0));
   }
 
-  /** The Photographer (tutor NPC placeholder), the billboard, and the studio session (goal.md §3.1 steps 2, 5). */
+  /** The Photographer (tutor) + extras on a runtime navmesh, the billboard, and the studio session (goal.md §3.1 steps 2, 5). */
   private setupStudio(feet: THREE.Vector3, f: THREE.Vector3, right: THREE.Vector3) {
-    // Photographer: a blue capsule with a "camera" box, 4 m ahead and to the right.
-    const npc = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.32, 1.0, 6, 16),
-      new THREE.MeshStandardMaterial({ color: 0x4fa3d9, roughness: 0.6 }),
-    );
-    body.position.y = 0.85;
-    const cam = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.12), new THREE.MeshStandardMaterial({ color: 0x0b0a10 }));
-    cam.position.set(0.18, 1.35, -0.28);
-    npc.add(body, cam);
-    const npcPos = feet.clone().addScaledVector(f, 4).addScaledVector(right, 1.6);
-    npcPos.y = this.ground ? groundHeightAt(this.ground, npcPos.x, npcPos.z) : feet.y;
-    npc.position.copy(npcPos);
-    npc.lookAt(feet.x, npcPos.y, feet.z);
-    this.world.add(npc);
-    this.photographer = npc;
+    const physics = this.physics!;
+    this.subtitles ??= createSubtitles(document.body);
+    const npcs = new NpcSystem(physics, this.world, this.ground, {
+      onGreet: (npc, line) => {
+        this.subtitles?.say(npc.spec.name, line);
+        this.sfx.tick(npc.spec.id === 'photographer' ? 900 : 600);
+        if (npc.spec.id === 'photographer' && this.studio?.state === 'idle') {
+          this.studio.brief();
+          this.updateHint();
+        }
+        this.syncNpcHook();
+      },
+    });
+    this.npcs = npcs;
+    const at = (fwd: number, side: number) => feet.clone().addScaledVector(f, fwd).addScaledVector(right, side);
+    npcs.spawn({
+      id: 'photographer',
+      name: 'Photographer',
+      color: 0x4fa3d9,
+      home: at(4, 1.6),
+      approaches: true,
+      speed: 1.5,
+      lines: [
+        'Say: camera low, follow me.',
+        'Roll it — Enter is action. Get low, keep the crate in frame.',
+        'Golden hour is on T. Sunset sells.',
+      ],
+    });
+    npcs.spawn({ id: 'npc_a', name: 'Rico', color: 0xd9a03a, home: at(9, -5), lines: ['Yo $COAST!', 'Nice ride.'] });
+    npcs.spawn({ id: 'npc_b', name: 'Mari', color: 0xb35cd9, home: at(-3, 6), lines: ['Tag that wall.', 'Hop it on the one.'] });
+    npcs.spawn({ id: 'npc_c', name: 'Dee', color: 0x3ad98a, home: at(7, 7), lines: ['Low and slow.', 'That your cut on the billboard?'] });
+    // Navmesh: the cell collider when there is one, else the splat-derived ground grid (bounded to the scan coverage).
+    const walkable: THREE.Mesh[] = [];
+    for (const m of this.colliderMeshes) m.traverse((o) => ((o as THREE.Mesh).isMesh ? walkable.push(o as THREE.Mesh) : null));
+    if (!walkable.length && this.groundMesh) walkable.push(this.groundMesh);
+    const c = this.ground?.coverage;
+    const bounds: [[number, number, number], [number, number, number]] | undefined = c
+      ? [
+          [c.minX, -50, c.minZ],
+          [c.maxX, 80, c.maxZ],
+        ]
+      : undefined;
+    const gen = this.physicsGen;
+    void npcs.buildNav(walkable, bounds).then(() => {
+      if (gen === this.physicsGen) this.syncNpcHook();
+    });
+    this.syncNpcHook();
 
     // Billboard: "your cut plays here" until a take exists, then the recorded clip (VideoTexture).
     const bbPos = feet.clone().addScaledVector(f, 6.5).addScaledVector(right, -2.2);
@@ -1208,6 +1243,10 @@ export class Game {
       this.sfx.engineUpdate(this.vehicle.speed, vi.throttle, driving);
     }
     this.sfx.spraySet(this.spraying);
+    if (this.npcs) {
+      this.npcs.update(dt, driving ? this.carFeet(this.tmpV) : ch.feet(this.tmpV), false);
+      if (this.frame % 10 === 0) this.syncNpcHook();
+    }
     if (this.rig.mode === 'actor' && !driving && !this.inXr) ch.yaw = this.rig.yaw;
     this.props?.sync(physics.alpha);
     this.vehicle?.sync(physics.alpha);
@@ -1392,7 +1431,8 @@ export class Game {
   private updateStudio(feet: THREE.Vector3) {
     const studio = this.studio;
     if (!studio) return;
-    const npcDist = this.photographer ? feet.distanceTo(this.photographer.position) : Infinity;
+    const photographer = this.npcs?.byId('photographer');
+    const npcDist = photographer ? feet.distanceTo(photographer.mesh.position) : Infinity;
     if (studio.state === 'idle' && npcDist < 2.6) {
       studio.brief();
       this.updateHint();
@@ -1405,8 +1445,17 @@ export class Game {
         this.updateHint();
       }
     } else this.verdictAt = 0;
-    if (this.photographer) this.photographer.lookAt(feet.x, this.photographer.position.y, feet.z);
     studio.tick(this.frameContext());
+  }
+
+  private syncNpcHook() {
+    const p = this.npcs?.byId('photographer');
+    window.__coastNpcs = {
+      count: this.npcs?.npcs.length ?? 0,
+      nav: this.npcs?.ready ?? false,
+      greets: this.npcs?.greets ?? 0,
+      photographer: p ? [p.mesh.position.x, p.mesh.position.y, p.mesh.position.z] : null,
+    };
   }
 
   private frameContext() {
