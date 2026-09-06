@@ -48,7 +48,8 @@ Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints 
 | Talk to the Photographer → mission             | she walks up to you (blue NPC); the extras greet in passing — subtitles at the bottom                  | same                    | same            |
 | Action / cut a take · replay the set           | Enter · P (every take of the mission performs together)                                                | ACTION                  | Start           |
 | Possess an NPC (play their part next take)     | V near them · V near the body that carries $COAST switches back                                        | BE                      | Back            |
-| Direct by saying it (typed until voice lands)  | `/` then e.g. _camera low, follow the car, golden hour, action_ · _put that there_ after two clicks    | SAY                     | —               |
+| Direct by saying it                            | hold **`** and speak (Chrome / Safari speech) · or `/` and type: _camera low, follow the car, action_  | MIC (hold) · SAY        | LT (hold)       |
+| Answer the director's question                 | _yes_ · _no_ · _the left one_ · _the closer one_ (a pending move shows as a ghost)                     | same                    | —               |
 | Lowrider: get in / out                         | E next to it                                                                                           | GRAB→EXIT               | X               |
 | Drive · handbrake · hop                        | WASD · Shift · Space (Shift+Space = all four)                                                          | stick · HOP             | sticks · LB · A |
 | Hydraulic switches (hold)                      | I front · K back · J left · L right                                                                    | LIFT (front)            | d-pad           |

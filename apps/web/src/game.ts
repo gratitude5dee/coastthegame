@@ -53,6 +53,7 @@ import { NpcSystem, type Npc, type NpcSpec } from './npc/npcs';
 import { GhostActor } from './studio/ghosts';
 import type { CameraRequest, SceneOps, UtteranceOutcome } from '@coast/director';
 import { DirectorConsole, summarize } from './director/console';
+import { VoiceInput } from './director/voice';
 import { createSubtitles, type Subtitles } from './ui/subtitles';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
 
@@ -171,6 +172,7 @@ declare global {
       shot: { distance: number; height: number; fovDeg: number };
     };
     __coastSay?: (text: string) => UtteranceOutcome;
+    __coastVoice?: { supported: boolean; state: string };
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -275,6 +277,9 @@ export class Game {
   /** What the follow camera is on when it is not the player: 'lowrider', a prop id or an NPC id (CAM-6 "follow the car"). */
   private followId: string | null = null;
   private typing = false;
+  /** Push-to-talk speech recognition feeding the console (browser Web Speech; the Realtime client replaces it in M5). */
+  private voice: VoiceInput | null = null;
+  private pttWasHeld = false;
   private billboard: THREE.Mesh | null = null;
   private billboardVideo: HTMLVideoElement | null = null;
   private readonly frustum = new THREE.Frustum();
@@ -366,6 +371,18 @@ export class Game {
         },
       });
       window.__coastSay = (text) => this.director!.say(text);
+      this.voice = new VoiceInput({
+        onTranscript: (text, speech) => this.director?.say(text, performance.now(), speech),
+        onInterim: (text) => this.director?.listening(text),
+        onState: (state, detail) => {
+          if (state === 'listening') this.director?.listening('');
+          else this.director?.listening(null);
+          if (state === 'denied') this.hint = 'microphone blocked — allow it in the address bar, or press / to type';
+          else if (state === 'error') this.hint = `speech recognition: ${detail ?? 'error'} — press / to type`;
+          this.syncVoiceHook();
+        },
+      });
+      this.syncVoiceHook();
     }
 
     if (this.isShot)
@@ -1134,6 +1151,12 @@ export class Game {
     }
     if (i.cancel) this.props?.select(null);
     if (i.say && this.director && !this.inXr) this.director.toggle();
+    if (this.voice && !this.typing) {
+      // Push-to-talk: hold ` / LT / MIC — the transcript directs on release.
+      if (i.ptt && !this.pttWasHeld) this.voice.start();
+      else if (!i.ptt && this.pttWasHeld) this.voice.stop();
+    }
+    this.pttWasHeld = i.ptt;
     if (i.muteToggle) {
       this.sfx.toggleMuted();
       this.updateHint();
@@ -1633,6 +1656,10 @@ export class Game {
     if (mode === 'actor') this.followId = null;
   }
 
+  private syncVoiceHook() {
+    window.__coastVoice = { supported: this.voice?.supported ?? false, state: this.voice?.state ?? 'none' };
+  }
+
   /** `__coastDirector`: the last direction's outcome, refreshed every frame with the live follow target and shot. */
   private syncDirectorHook(text?: string, outcome?: UtteranceOutcome) {
     const prev = window.__coastDirector;
@@ -1912,6 +1939,18 @@ export class Game {
         this.setRigMode(mode);
         return true;
       },
+      preview: (id, pos) => {
+        const props = this.props;
+        if (!props) return;
+        const prop = id ? propOf(id) : null;
+        if (!prop || !pos) {
+          props.select(null);
+          return;
+        }
+        props.select(prop);
+        props.previewAt(new THREE.Vector3(pos[0], pos[1], pos[2]));
+        performance.mark('coast:act-preview');
+      },
     };
   }
 
@@ -2017,7 +2056,7 @@ export class Game {
     else if (this.rig.mode === 'director')
       this.hint =
         (this.followId ? `following ${this.followId} · ` : '') +
-        'drag to orbit · wheel zoom · WASD move · E grab / get in the car · click a prop then the ground = put that there · / say "camera low, follow the car"';
+        'drag to orbit · wheel zoom · WASD move · E grab / get in the car · click a prop then the ground = put that there · / type or hold ` and say "camera low, follow the car"';
     else this.hint = 'overhead: drag to orbit · wheel zoom · click a prop, then click where it goes · / say "put that there"';
   }
 

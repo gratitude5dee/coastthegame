@@ -6,7 +6,7 @@
  */
 import type { DeixisBuffer } from '@coast/engine';
 import { resolveObject, resolvePlace, type ResolveContext, type SceneIndex, type SpeechWindow } from './deixis';
-import { parseUtterance, type Utterance } from './grammar';
+import { parseUtterance, type Meta, type Utterance } from './grammar';
 import type { ActEnvelope, ActResult, CameraMove, ObjectRef, RigMode, SceneAct, ShotName } from './schema';
 
 export type TimePresetName = 'golden' | 'blue' | 'night' | 'fog_noon';
@@ -41,6 +41,8 @@ export interface SceneOps extends SceneIndex {
   undo(n: number): number;
   camera(req: CameraRequest): boolean;
   setMode(mode: RigMode): boolean;
+  /** Ghost preview of a pending move (DIR-3): `pos` null clears it. Optional — a scene without ghosts just asks. */
+  preview?(id: string | null, pos: [number, number, number] | null): void;
 }
 
 export interface ExecuteOptions {
@@ -66,9 +68,22 @@ export interface UtteranceOutcome {
 
 const NOT_HERE = (what: string): ActResult => ({ ok: false, affected: [], confidence: 1, error: `${what} is not available here` });
 
+/** A question left open by the last act: the reply ("yes", "the left one", "no") finishes it. */
+interface Pending {
+  act: SceneAct;
+  kind: 'object' | 'place';
+  objects: string[];
+  places: [number, number, number][];
+  ctx: ResolveContext;
+  /** A ghost is on screen for this question. */
+  previewing: boolean;
+}
+
 export class ActExecutor {
   /** The object the last successful act touched — what "it" means next. */
   lastMentioned: string | undefined;
+  private pending: Pending | null = null;
+  private ambiguity: { kind: 'object' | 'place'; objects: string[]; places: [number, number, number][] } | null = null;
   private readonly confirmBelow: number;
   private readonly confirmDeleteBelow: number;
   private serial = 0;
@@ -86,6 +101,10 @@ export class ActExecutor {
     const utterance = parseUtterance(text);
     const results: ActResult[] = [];
     for (const clause of utterance.clauses) {
+      if (clause.meta) {
+        results.push(this.reply(clause.meta, ctx.speakerForward));
+        continue;
+      }
       if (!clause.act) {
         results.push({ ok: false, affected: [], confidence: 0, error: `didn't get "${clause.text}"` });
         continue;
@@ -118,11 +137,98 @@ export class ActExecutor {
       speakerId: 'me',
       ...(this.lastMentioned ? { lastMentioned: this.lastMentioned } : {}),
     };
+    this.clearPending();
+    this.ambiguity = null;
     const result = this.run(env.act, ctx);
     if (result.ok && result.affected[0] && result.affected[0] !== 'me' && !/^(camera|take|mode|time|weather)$/.test(result.affected[0])) {
       this.lastMentioned = result.affected[0];
     }
+    const amb = this.takeAmbiguity(); // (a method, so the type checker does not assume the field stayed null)
+    if (!result.ok && result.question && amb) {
+      this.pending = { act: env.act, ctx, ...amb, previewing: false };
+      // A pending move with a candidate place shows where it would go.
+      if (env.act.op === 'move' && amb.kind === 'place' && amb.places[0] && result.affected[0] && this.ops.preview) {
+        this.ops.preview(result.affected[0], amb.places[0]);
+        this.pending.previewing = true;
+      }
+    }
     return result;
+  }
+
+  private takeAmbiguity() {
+    const a = this.ambiguity;
+    this.ambiguity = null;
+    return a;
+  }
+
+  /** Whether a question is waiting for a reply. */
+  get hasPending() {
+    return !!this.pending;
+  }
+
+  /** "yes" / "the left one" / "no": finish (or drop) the pending act. */
+  reply(meta: Meta, speakerForward: [number, number]): ActResult {
+    const p = this.pending;
+    if (!p) return { ok: false, affected: [], confidence: 1, error: 'nothing to confirm' };
+    this.clearPending();
+    if (meta.kind === 'cancel') return { ok: true, affected: [], confidence: 1 };
+    let act: SceneAct;
+    if (p.kind === 'place') {
+      const pos = p.places[0];
+      if (!pos || p.act.op !== 'move') return { ok: false, affected: [], confidence: 1, error: 'nothing to confirm' };
+      act = { ...p.act, place: { pos } };
+    } else {
+      const id = meta.kind === 'pick' ? this.pickCandidate(p.objects, meta.which, p.ctx, speakerForward) : p.objects[0];
+      if (!id) return { ok: false, affected: p.objects, confidence: 0.5, question: 'which?' };
+      act = withExplicitRef(p.act, id);
+    }
+    this.ambiguity = null;
+    const result = this.run(act, p.ctx);
+    if (result.ok && result.affected[0]) this.lastMentioned = result.affected[0];
+    return result;
+  }
+
+  private clearPending() {
+    if (this.pending?.previewing) this.ops.preview?.(null, null);
+    this.pending = null;
+  }
+
+  /** Choose among candidates: by order, by side (speaker's left/right) or by distance from the speaker. */
+  private pickCandidate(
+    ids: string[],
+    which: Extract<Meta, { kind: 'pick' }>['which'],
+    ctx: ResolveContext,
+    forward: [number, number],
+  ): string | undefined {
+    if (which === 'first') return ids[0];
+    if (which === 'second') return ids[1] ?? ids[0];
+    const me = ctx.scene.positionOf(ctx.speakerId ?? 'me') ?? [0, 0, 0];
+    const [fx, fz] = forward;
+    const len = Math.hypot(fx, fz) || 1;
+    const rx = -fz / len;
+    const rz = fx / len; // right = forward × up
+    const scored = ids
+      .map((id) => {
+        const p = ctx.scene.positionOf(id);
+        if (!p) return { id, side: 0, dist: Infinity };
+        const dx = p[0] - me[0];
+        const dz = p[2] - me[2];
+        return { id, side: dx * rx + dz * rz, dist: Math.hypot(dx, dz) };
+      })
+      .filter((s) => Number.isFinite(s.dist));
+    if (!scored.length) return undefined;
+    const by = (f: (s: (typeof scored)[number]) => number) => [...scored].sort((a, b) => f(a) - f(b))[0]!.id;
+    switch (which) {
+      case 'left':
+        return by((s) => s.side);
+      case 'right':
+        return by((s) => -s.side);
+      case 'near':
+        return by((s) => s.dist);
+      case 'far':
+        return by((s) => -s.dist);
+    }
+    return undefined;
   }
 
   private ref(ref: ObjectRef, ctx: ResolveContext, bar = this.confirmBelow): { id?: string; result?: ActResult } {
@@ -130,6 +236,7 @@ export class ActExecutor {
     const r = resolveObject(ref, ctx);
     if (!r.value) return { result: { ok: false, affected: r.candidates, confidence: r.confidence, question: r.question ?? 'which?' } };
     if (r.confidence < bar) {
+      this.ambiguity = { kind: 'object', objects: r.candidates, places: [] };
       return { result: { ok: false, affected: r.candidates, confidence: r.confidence, question: r.question ?? 'this one?' } };
     }
     return { id: r.value };
@@ -144,7 +251,10 @@ export class ActExecutor {
         if (!o.id) return o.result!;
         const p = resolvePlace(act.place, ctx);
         if (!p.value) return { ok: false, affected: [o.id], confidence: p.confidence, question: p.question ?? 'where?' };
-        if (p.confidence < this.confirmBelow) return { ok: false, affected: [o.id], confidence: p.confidence, question: 'there?' };
+        if (p.confidence < this.confirmBelow) {
+          this.ambiguity = { kind: 'place', objects: [o.id], places: p.candidates };
+          return { ok: false, affected: [o.id], confidence: p.confidence, question: 'there?' };
+        }
         return ops.move(o.id, p.value) ? done(o.id, Math.min(p.confidence, 1)) : NOT_HERE(`moving ${o.id}`);
       }
       case 'rotate': {
@@ -237,5 +347,27 @@ export class ActExecutor {
       case 'set_mode':
         return ops.setMode(act.mode) ? done('mode') : NOT_HERE(`${act.mode} mode`);
     }
+  }
+}
+
+/** The act again with its ambiguous reference pinned to `id` (the first ref that is not already explicit). */
+function withExplicitRef(act: SceneAct, id: string): SceneAct {
+  const pin = (ref: ObjectRef | undefined): ObjectRef | undefined => (ref && !('id' in ref) ? { id } : ref);
+  switch (act.op) {
+    case 'move':
+    case 'rotate':
+    case 'scale':
+    case 'delete':
+    case 'set_material':
+    case 'ungroup':
+      return { ...act, obj: pin(act.obj)! };
+    case 'play_anim':
+    case 'possess':
+    case 'replay_take':
+      return { ...act, actor: pin(act.actor)! };
+    case 'camera':
+      return { ...act, ...(act.follow ? { follow: pin(act.follow)! } : {}), ...(act.look_at ? { look_at: pin(act.look_at)! } : {}) };
+    default:
+      return act;
   }
 }

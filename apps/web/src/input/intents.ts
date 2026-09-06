@@ -27,6 +27,7 @@ export interface FrameInput {
   playback: boolean; // edge — P: replay the set (this mission's takes)
   possess: boolean; // edge — V / Back: possess the nearest NPC (or the body that carries you, to switch back)
   say: boolean; // edge — `/` or SAY: open the director's console (type what you would say)
+  ptt: boolean; // held — push-to-talk: ` (backquote) · LT · MIC: the browser's speech recognition feeds the director
   /** Hydraulic switchbox, held: x = −1 left side up … +1 right side up; y = +1 front up … −1 back up (I/J/K/L, d-pad). */
   hydro: THREE.Vector2;
   beatToggle: boolean; // edge — H / BEAT: hop on the beat grid (auto-hydraulics + metronome)
@@ -67,6 +68,7 @@ export function newFrameInput(): FrameInput {
     playback: false,
     possess: false,
     say: false,
+    ptt: false,
     hydro: new THREE.Vector2(),
     beatToggle: false,
     muteToggle: false,
@@ -105,6 +107,7 @@ export function resetFrameInput(f: FrameInput) {
       false;
   f.sceneKey = null;
   f.sprint = false;
+  f.ptt = false;
   f.primaryHeld = false;
   f.pointerRay = null;
   f.snapTurn = 0;

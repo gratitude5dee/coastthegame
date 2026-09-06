@@ -9,10 +9,15 @@
  */
 import type { CameraMove, ObjectRef, PlaceRef, Relation, RigMode, SceneAct, ShotName } from './schema';
 
+/** Replies to a question the executor asked ("this one?", "there?"): not scene acts, they finish a pending one. */
+export type Meta =
+  { kind: 'confirm' } | { kind: 'cancel' } | { kind: 'pick'; which: 'first' | 'second' | 'left' | 'right' | 'near' | 'far' };
+
 export interface Clause {
   text: string;
-  /** null when nothing matched (surfaced as "didn't get …"). */
+  /** null when nothing matched (surfaced as "didn't get …") — or when the clause is a reply (`meta`). */
   act: SceneAct | null;
+  meta?: Meta;
 }
 
 export interface Utterance {
@@ -87,6 +92,12 @@ export function parseUtterance(text: string): Utterance {
   for (const c of clauses) {
     let m: RegExpExecArray | null;
     const before = acts.length;
+    // ── replies to a question ──
+    const meta = parseMeta(c);
+    if (meta) {
+      parsed.push({ text: c, act: null, meta });
+      continue;
+    }
     // ── takes ──
     if (/^(action|roll( it| camera| sound)?|rolling|we'?re rolling|record|start recording|shoot)$/.test(c)) {
       acts.push({ op: 'record', action: 'start' });
@@ -217,4 +228,27 @@ export function parseUtterance(text: string): Utterance {
     parsed.push({ text: c, act: acts.length > before ? acts[acts.length - 1]! : null });
   }
   return { transcript, clauses: parsed, acts, deicticTotal, unknown };
+}
+
+function parseMeta(c: string): Meta | null {
+  if (/^(yes|yeah|yep|yup|do it|go|go ahead|confirm|ok|okay|sure|that one|this one|that'?s it|exactly|correct)$/.test(c))
+    return { kind: 'confirm' };
+  if (/^(no|nope|cancel|not that one|not that|wrong one|forget it)$/.test(c)) return { kind: 'cancel' };
+  // "the left one", "the closer one", "first one" — never a bare "closer" (that is a camera shot).
+  const WORDS = 'first|second|other|left|right|near|nearer|nearest|close|closer|closest|far|farther|farthest|further|furthest';
+  const m = new RegExp(`^(?:(?:the|take the|use the) (${WORDS})(?: one)?|(${WORDS}) one)$`).exec(c);
+  if (!m) return null;
+  const w = (m[1] ?? m[2])!;
+  const which = /first/.test(w)
+    ? 'first'
+    : /second|other/.test(w)
+      ? 'second'
+      : /left/.test(w)
+        ? 'left'
+        : /right/.test(w)
+          ? 'right'
+          : /near|close/.test(w)
+            ? 'near'
+            : 'far';
+  return { kind: 'pick', which };
 }

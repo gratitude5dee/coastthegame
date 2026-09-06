@@ -79,4 +79,14 @@ describe('parseUtterance — the scripted suite', () => {
     expect(parseUtterance('').acts).toEqual([]);
     expect(parseUtterance('spawn that').unknown).toEqual(['spawn that']); // "that" is not an asset
   });
+
+  it('replies to a question are not scene acts: yes / no / the left one', () => {
+    expect(parseUtterance('yes').clauses[0]).toEqual({ text: 'yes', act: null, meta: { kind: 'confirm' } });
+    expect(parseUtterance('nope').clauses[0]!.meta).toEqual({ kind: 'cancel' });
+    expect(parseUtterance('the left one').clauses[0]!.meta).toEqual({ kind: 'pick', which: 'left' });
+    expect(parseUtterance('closer one').clauses[0]!.meta).toEqual({ kind: 'pick', which: 'near' });
+    expect(parseUtterance('the other one').clauses[0]!.meta).toEqual({ kind: 'pick', which: 'second' });
+    expect(parseUtterance('closer').acts).toEqual([{ op: 'camera', shot: 'close' }]); // a bare "closer" is still a shot
+    expect(parseUtterance('yes').unknown).toEqual([]);
+  });
 });

@@ -35,6 +35,7 @@ export class GamepadProvider implements InputProvider {
     if (edge(8)) out.possess = true; // Back / Select
     if (edge(7)) out.beatToggle = true; // RT
     out.sprint = out.sprint || pressed(4); // LB
+    out.ptt = out.ptt || pressed(6); // LT — hold to talk to the director
     if (pressed(12)) out.hydro.y += 1; // d-pad up = front up
     if (pressed(13)) out.hydro.y -= 1; // down = back up
     if (pressed(14)) out.hydro.x -= 1; // left side up

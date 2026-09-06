@@ -21,6 +21,7 @@ export interface ConsoleHooks {
 }
 
 const SPEECH_WINDOW_MS = 4000;
+const PLACEHOLDER = 'camera low, follow the car, then action — Enter to direct · Esc to close';
 
 /** One line per clause: ✓ what happened · ? the question · ✗ the error. */
 export function summarize(outcome: UtteranceOutcome): string {
@@ -64,7 +65,7 @@ export class DirectorConsole {
     tag.style.cssText = 'color:#ffb54a;font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:11px';
     this.input = document.createElement('input');
     this.input.type = 'text';
-    this.input.placeholder = 'camera low, follow the car, then action — Enter to direct · Esc to close';
+    this.input.placeholder = PLACEHOLDER;
     this.input.setAttribute('aria-label', 'direct the scene');
     this.input.autocomplete = 'off';
     this.input.spellcheck = false;
@@ -110,11 +111,33 @@ export class DirectorConsole {
     else this.show();
   }
 
-  /** Direct the scene with a line of text (the bar, `?say=`, the e2e hook, later the voice transcript). */
-  say(text: string, nowMs = performance.now()): UtteranceOutcome {
+  /**
+   * Show what the microphone hears while push-to-talk is held (the bar without focus: the game keeps the keyboard);
+   * `null` hides it again.
+   */
+  listening(interim: string | null) {
+    if (interim === null) {
+      if (!this.open) this.el.style.display = 'none';
+      this.input.readOnly = false;
+      this.input.placeholder = PLACEHOLDER;
+      return;
+    }
+    if (this.open) this.close();
+    this.el.style.display = 'flex';
+    this.input.readOnly = true;
+    this.input.value = '';
+    this.input.placeholder = interim ? `🎙 ${interim}` : '🎙 listening… (release to direct)';
+  }
+
+  /**
+   * Direct the scene with a line of text (the bar, `?say=`, the e2e hook, the voice transcript). Speech recognition
+   * passes the real speech window; typed directions use the last 4 s before Enter.
+   */
+  say(text: string, nowMs = performance.now(), speech?: { startMs: number; endMs: number }): UtteranceOutcome {
+    this.listening(null);
     const outcome = this.executor.say(text, {
       buffer: this.buffer,
-      speech: { startMs: nowMs - SPEECH_WINDOW_MS, endMs: nowMs },
+      speech: speech ?? { startMs: nowMs - SPEECH_WINDOW_MS, endMs: nowMs },
       mode: this.hooks.mode(),
       speakerForward: this.hooks.forward(),
     });

@@ -89,6 +89,9 @@ function fakeScene() {
       log.push(`mode ${m}`);
       return true;
     },
+    preview: (id, pos) => {
+      log.push(`preview ${id ?? '-'} ${pos ? pos.map((v) => v.toFixed(1)).join(',') : '-'}`);
+    },
   };
   return { ops, log, positions };
 }
@@ -156,5 +159,42 @@ describe('ActExecutor', () => {
     expect(say(ex, 'spawn a piano').results[0]).toMatchObject({ ok: false, error: 'no asset "piano"' });
     expect(say(ex, 'cut, replay, undo, mark beat drop, director').results.every((r) => r.ok)).toBe(true);
     expect(log.slice(1)).toEqual(['record stop', 'replay', 'undo 1', 'mark drop', 'mode director']);
+  });
+
+  it('a reply finishes a pending question: "the left one" / "yes" pick a candidate, "no" drops it', () => {
+    const { ops, log } = fakeScene();
+    const ex = new ActExecutor(ops);
+    // crate_1 is at x=2, crate_2 at x=8; the speaker faces −Z, so screen-right is +X.
+    expect(say(ex, 'paint the crate red').results[0]).toMatchObject({ ok: false, question: 'this one?' });
+    expect(ex.hasPending).toBe(true);
+    expect(say(ex, 'the right one').results[0]).toMatchObject({ ok: true, affected: ['crate_2'] });
+    expect(ex.hasPending).toBe(false);
+    expect(say(ex, 'delete the crate').results[0]).toMatchObject({ ok: false, question: 'this one?' });
+    expect(say(ex, 'the near one').results[0]).toMatchObject({ ok: true, affected: ['crate_1'] });
+    expect(say(ex, 'rotate the crate').results[0]).toMatchObject({ ok: false, question: 'this one?' });
+    expect(say(ex, 'no').results[0]).toMatchObject({ ok: true, affected: [] });
+    expect(say(ex, 'yes').results[0]).toMatchObject({ ok: false, error: 'nothing to confirm' });
+    expect(say(ex, 'move the crate next to the cone').results[0]).toMatchObject({ ok: false, question: 'this one?' });
+    expect(say(ex, 'yes').results[0]).toMatchObject({ ok: true, affected: ['crate_1'] }); // "yes" takes the first candidate
+    expect(log).toEqual(['paint crate_2 red', 'remove crate_1', 'move crate_1 → -1.0,0.0,-4.0']); // next to = 1 m to the cone's right
+  });
+
+  it('a low-confidence place previews the move as a ghost until it is confirmed or something else is said', () => {
+    const { ops, log } = fakeScene();
+    // Only a head ray for "there" (0.72): fine for a relaxed set, a question for a strict one.
+    const looked = new DeixisBuffer();
+    looked.push({ t: 2000, headHit: 'crate_1', groundPoint: [4, 0, -8] });
+    const strict = new ActExecutor(ops, { confirmBelow: 0.8 });
+    expect(say(strict, 'put the cone there', looked).results[0]).toMatchObject({ ok: false, question: 'there?', affected: ['cone_1'] });
+    expect(log.at(-1)).toBe('preview cone_1 4.0,0.0,-8.0');
+    expect(say(strict, 'yes').results[0]).toMatchObject({ ok: true, affected: ['cone_1'] });
+    expect(log.slice(-2)).toEqual(['preview - -', 'move cone_1 → 4.0,0.0,-8.0']);
+    // A new direction while a question is open drops the question (and its ghost).
+    expect(say(strict, 'put the cone there', looked).results[0]).toMatchObject({ ok: false, question: 'there?' });
+    say(strict, 'golden hour');
+    expect(log.slice(-2)).toEqual(['preview - -', 'time golden']);
+    expect(strict.hasPending).toBe(false);
+    const relaxed = new ActExecutor(ops);
+    expect(say(relaxed, 'put the cone there', looked).results[0]).toMatchObject({ ok: true });
   });
 });
