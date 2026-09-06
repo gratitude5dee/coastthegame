@@ -77,3 +77,17 @@ describe('groundFromSplats', () => {
     expect(groundHeightAt(grid, 2, -1)).toBeCloseTo(2, 1);
   });
 });
+
+describe('flattestSpot', () => {
+  it('parks on the plateau, not the slope', async () => {
+    const { flattestSpot } = await import('../../packages/engine/src/physics/world');
+    // A 40×40 m grid: flat at y = 0 for x ≥ 2, a 45° slope rising toward −x for x < 2.
+    const cols = 41;
+    const heights = new Float32Array(cols * cols);
+    for (let z = 0; z < cols; z++) for (let x = 0; x < cols; x++) heights[z * cols + x] = Math.max(0, 2 - (x - 20)) * 1;
+    const grid = { heights, cols, rows: cols, minX: -20, minZ: -20, cellSize: 1 };
+    const spot = flattestSpot(grid, new THREE.Vector3(0, 0, 0), 4, 9, 2.5, 2.5);
+    expect(spot.range).toBeLessThan(0.01);
+    expect(spot.position.x).toBeGreaterThan(2); // on the flat side
+  });
+});

@@ -16,6 +16,7 @@ import {
   SplatPainter,
   budgetsFor,
   dioramaPlacement,
+  flattestSpot,
   framePositionForHead,
   groundFromSplats,
   groundHeightAt,
@@ -608,9 +609,14 @@ export class Game {
       if (target) props.grab(target); // QA: start holding a prop (e.g. grab=can_3 for the spray test)
     }
 
-    // The lowrider idles ahead and to the left, facing the same way (PHY-3). It drops onto its suspension.
+    // The lowrider idles nearby, facing the same way (PHY-3), parked on the flattest patch within a few metres so it
+    // never spawns half inside a hillside (which launches it). It drops onto its suspension.
     const carPos = feet.clone().addScaledVector(f, 5).addScaledVector(right, -3.5);
-    carPos.y = (this.ground ? groundHeightAt(this.ground, carPos.x, carPos.z) : feet.y) + 1.0;
+    if (this.ground) {
+      const spot = flattestSpot(this.ground, feet, 4, 9, 2.6, 2.6);
+      carPos.copy(spot.position);
+      carPos.y += 1.2;
+    } else carPos.y = feet.y + 1.0;
     this.vehicle = new Lowrider(physics, { position: carPos, yaw: this.rig.yaw });
     this.vehicleSpawn = { pos: carPos.clone(), yaw: this.rig.yaw };
     this.world.add(this.vehicle.group);

@@ -178,6 +178,47 @@ export function groundGridGeometry(grid: GroundGrid): THREE.BufferGeometry {
   return geometry;
 }
 
+/**
+ * Flattest spot on a ring around `center` (radii in m) for a footprint of `halfX` × `halfZ` m — where to park a car so
+ * it does not spawn half-inside a hillside. Scores each candidate by the height range under the footprint (lower is
+ * flatter); returns the best candidate and its score. Falls back to `center` when nothing is inside the grid.
+ */
+export function flattestSpot(
+  grid: GroundGrid,
+  center: THREE.Vector3,
+  radiusMin: number,
+  radiusMax: number,
+  halfX = 2.5,
+  halfZ = 2.5,
+  angles = 16,
+): { position: THREE.Vector3; range: number } {
+  const maxX = grid.minX + (grid.cols - 1) * grid.cellSize;
+  const maxZ = grid.minZ + (grid.rows - 1) * grid.cellSize;
+  const inside = (x: number, z: number) => x >= grid.minX && x <= maxX && z >= grid.minZ && z <= maxZ;
+  let best: { position: THREE.Vector3; range: number } | null = null;
+  const step = Math.max(grid.cellSize, 0.5);
+  for (let r = radiusMin; r <= radiusMax + 1e-6; r += Math.max(1, (radiusMax - radiusMin) / 3)) {
+    for (let a = 0; a < angles; a++) {
+      const t = (a / angles) * Math.PI * 2;
+      const cx = center.x + Math.sin(t) * r;
+      const cz = center.z + Math.cos(t) * r;
+      if (!inside(cx - halfX, cz - halfZ) || !inside(cx + halfX, cz + halfZ)) continue;
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let x = cx - halfX; x <= cx + halfX + 1e-6; x += step) {
+        for (let z = cz - halfZ; z <= cz + halfZ + 1e-6; z += step) {
+          const h = groundHeightAt(grid, x, z);
+          if (h < lo) lo = h;
+          if (h > hi) hi = h;
+        }
+      }
+      const range = hi - lo;
+      if (!best || range < best.range) best = { position: new THREE.Vector3(cx, groundHeightAt(grid, cx, cz), cz), range };
+    }
+  }
+  return best ?? { position: new THREE.Vector3(center.x, groundHeightAt(grid, center.x, center.z), center.z), range: 0 };
+}
+
 /** Bilinear height lookup on a ground grid (world XZ → Y), clamped to the grid. */
 export function groundHeightAt(grid: GroundGrid, x: number, z: number): number {
   const fx = THREE.MathUtils.clamp((x - grid.minX) / grid.cellSize, 0, grid.cols - 1.0001);
