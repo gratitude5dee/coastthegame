@@ -1,0 +1,22 @@
+{
+  "name": "@coast/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "build": "echo 'consumed as source by Vite'",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "echo 'eslint (root config) — TODO M0'"
+  },
+  "peerDependencies": {
+    "@sparkjsdev/spark": "2.1.0",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.180.0",
+    "typescript": "^5.7.2"
+  }
+}

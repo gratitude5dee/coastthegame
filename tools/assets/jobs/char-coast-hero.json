@@ -1,0 +1,44 @@
+{
+  "id": "char-coast-hero",
+  "type": "tripo",
+  "description": "$COAST hero character: Tripo H3.1 image-to-3D from the approved turnaround \u2192 rig (mixamo spec) \u2192 preset clips \u2192 GLB (goal.md CHR-3). Preset ids follow the v1.0 biped rig docs (`preset:biped:*`) \u2014 verify on first call (goal.md Appendix A).",
+  "inputs": {
+    "images": [
+      "art/concept/approved/coast-turnaround-front.png",
+      "art/concept/approved/coast-turnaround-side.png",
+      "art/concept/approved/coast-turnaround-back.png"
+    ]
+  },
+  "params": {
+    "modelVersion": "v3.1-20260211",
+    "texture": "HD",
+    "rig": {
+      "spec": "mixamo",
+      "outFormat": "glb",
+      "model": "v1.0-20240301"
+    },
+    "retarget": [
+      "preset:biped:idle",
+      "preset:biped:walk",
+      "preset:biped:run",
+      "preset:biped:jump",
+      "preset:biped:dance_01"
+    ],
+    "postprocess": [
+      "blender:cleanup-character",
+      "gltf-transform:optimize"
+    ]
+  },
+  "outputs": [
+    {
+      "name": "coast-hero.glb",
+      "kind": "glb"
+    },
+    {
+      "name": "coast-hero.manifest.json",
+      "kind": "json"
+    }
+  ],
+  "budgetUsd": 1.0,
+  "parallelSafe": true
+}

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#0b0a10" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <title>$COAST the Game</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0a10; color: #f2ecdc; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; touch-action: none; }
+      #hud { position: fixed; left: 12px; top: 12px; font-size: 12px; line-height: 1.5; opacity: .85; pointer-events: none; text-shadow: 0 1px 2px #000; }
+      #hud b { color: #ffb54a; }
+      #enter { position: fixed; right: 12px; top: 12px; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">loading…</div>
+    <div id="enter"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "coast/asset-job",
+  "title": "Asset job spec (goal.md AF-1)",
+  "type": "object",
+  "required": ["id", "type", "inputs", "outputs"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "type": { "enum": ["concept", "texture", "tripo", "marble", "blender", "convert", "lod", "audio", "video"] },
+    "description": { "type": "string" },
+    "inputs": { "type": "object", "description": "Logical inputs: prompts, R2 keys, other job ids (\"job:<id>\")" },
+    "params": { "type": "object" },
+    "outputs": {
+      "type": "array",
+      "items": { "type": "object", "required": ["name", "kind"], "properties": { "name": { "type": "string" }, "kind": { "enum": ["png", "jpg", "glb", "spz", "rad", "json", "mp4", "opus", "wav"] } } }
+    },
+    "budgetUsd": { "type": "number", "description": "Expected spend; runner refuses to start above DAILY cap remaining" },
+    "parallelSafe": { "type": "boolean", "default": true }
+  }
+}

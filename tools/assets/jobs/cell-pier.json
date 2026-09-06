@@ -1,0 +1,19 @@
+{
+  "id": "cell-pier",
+  "type": "marble",
+  "description": "Pier / boardwalk cell at golden hour (goal.md AD-2). Generated from approved key art + text; exported as spz + collider + pano; then job:lod-pier.",
+  "inputs": {
+    "images": ["art/concept/approved/pier-golden.png"],
+    "text": "West Coast pier and boardwalk at golden hour, fog rolling in from the Pacific, sodium streetlights just switching on, weathered wood, a DJ booth, seagulls. Photoreal, physically plausible light."
+  },
+  "params": { "model": "marble-1.1", "promptType": "image", "export": ["splats:spz:500k", "splats:spz:full", "mesh:collider"] },
+  "outputs": [
+    { "name": "pier.500k.spz", "kind": "spz" },
+    { "name": "pier.full.spz", "kind": "spz" },
+    { "name": "pier.collider.glb", "kind": "glb" },
+    { "name": "pier.pano.jpg", "kind": "jpg" },
+    { "name": "pier.cell.json", "kind": "json" }
+  ],
+  "budgetUsd": 2.5,
+  "parallelSafe": true
+}

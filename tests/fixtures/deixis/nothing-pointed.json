@@ -1,0 +1,29 @@
+{
+  "name": "no pointing at all \u2014 resolver must ask, never guess",
+  "utterance": "paint that",
+  "speech": {
+    "startMs": 100,
+    "endMs": 700
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 300
+    },
+    {
+      "t": 600
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "question": "which?"
+      }
+    }
+  ]
+}

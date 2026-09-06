@@ -1,0 +1,14 @@
+{
+  "name": "$COAST the Game",
+  "short_name": "$COAST",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0b0a10",
+  "theme_color": "#0b0a10",
+  "description": "Play inside worlds made from your reality. Shoot your own $COAST music video.",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

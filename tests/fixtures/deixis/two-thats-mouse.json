@@ -1,0 +1,74 @@
+{
+  "name": "move that next to that \u2014 two clicks, ordinals map to the two click edges",
+  "utterance": "move that next to that",
+  "speech": {
+    "startMs": 5000,
+    "endMs": 6800
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 5400,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    },
+    {
+      "t": 5700,
+      "pointerHit": "can_red"
+    },
+    {
+      "t": 6300,
+      "pointerHit": "taco_truck",
+      "clickEdge": true
+    },
+    {
+      "t": 6600,
+      "pointerHit": "taco_truck"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.85
+      }
+    },
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 2
+      },
+      "kind": "object",
+      "expect": {
+        "id": "taco_truck",
+        "minConfidence": 0.85
+      }
+    },
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "deictic": "that",
+            "ordinal": 2
+          },
+          "rel": "next_to",
+          "distance_m": 1
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [
+          1,
+          0,
+          -5
+        ],
+        "minConfidence": 0.8
+      }
+    }
+  ]
+}

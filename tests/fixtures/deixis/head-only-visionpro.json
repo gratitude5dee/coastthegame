@@ -1,0 +1,37 @@
+{
+  "name": "Vision Pro: head ray only, no pinch \u2014 lower confidence band, still resolves",
+  "utterance": "delete that",
+  "speech": {
+    "startMs": 100,
+    "endMs": 900
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 200,
+      "headHit": "cone_orange"
+    },
+    {
+      "t": 500,
+      "headHit": "cone_orange"
+    },
+    {
+      "t": 800,
+      "headHit": "car_blue"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.7,
+        "maxConfidence": 0.79
+      }
+    }
+  ]
+}

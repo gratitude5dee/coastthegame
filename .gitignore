@@ -1,0 +1,29 @@
+node_modules/
+dist/
+.wrangler/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+test-results/
+playwright-report/
+# large binaries never in git (see AGENTS.md §3)
+*.spz
+*.rad
+*.radc
+*.ply
+*.splat
+*.ksplat
+*.mp4
+*.mov
+*.wav
+*.blend1
+# GLBs ≤ 5 MB are allowed in assets/ (scripts/check-binaries.sh enforces the size rule in CI)
+assets/large/
+art/renders/
+tools/assets/out/
+docs/perf/*.json
+
+# M0 sample splat (4 MB, under the 5 MB rule) so the seed and CI never depend on an external host
+!apps/web/public/samples/*.spz

@@ -1,0 +1,9 @@
+{
+  "$comment": "Example manifest shape written by tools/assets/run.ts publish",
+  "job": "cell-pier",
+  "outputs": {
+    "pier.500k.spz": { "url": "https://assets.coast.wzrd.tech/cells/pier/8f3a…/pier.500k.spz", "sha256": "…", "bytes": 0 }
+  },
+  "costUsd": 0,
+  "createdAt": "2026-09-06T00:00:00Z"
+}

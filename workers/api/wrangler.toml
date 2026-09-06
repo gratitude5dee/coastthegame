@@ -1,0 +1,55 @@
+name = "coast-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# The built PWA is served as static assets from the same Worker (≤25 MiB per file; large assets live in R2).
+[assets]
+directory = "../../apps/web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[vars]
+ENVIRONMENT = "dev"
+ALLOWED_ORIGIN = "http://localhost:5173"   # prod: https://coast.wzrd.tech
+DAILY_SPEND_CAP_USD = "40"
+SESSION_SPEND_CAP_USD = "3"
+
+# R2 CORS (set on the bucket, not here): AllowedOrigins = [https://coast.wzrd.tech, http://localhost:5173],
+# AllowedMethods = [GET, HEAD], AllowedHeaders = [range], ExposeHeaders = [content-range, accept-ranges, etag, content-length]
+# — Spark's `paged: true` fetches .rad chunks with HTTP Range across origins (assets.coast.wzrd.tech).
+[[r2_buckets]]
+binding = "ASSETS_BUCKET"      # cells (.rad/.spz/collider/pano), characters, audio
+bucket_name = "coast-assets"
+
+[[r2_buckets]]
+binding = "USER_BUCKET"        # captures, takes, shots, cuts, renders
+bucket_name = "coast-user"
+
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "REPLACE_ME"
+
+[[queues.producers]]
+binding = "JOBS"
+queue = "coast-jobs"
+
+[[queues.consumers]]
+queue = "coast-jobs"
+max_batch_size = 5
+max_retries = 3
+
+[[durable_objects.bindings]]
+name = "SESSION"
+class_name = "SessionDO"
+
+[[durable_objects.bindings]]
+name = "JOB"
+class_name = "JobDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionDO", "JobDO"]
+
+# Secrets (wrangler secret put …): OPENAI_API_KEY WORLDLABS_API_KEY TRIPO_API_KEY FAL_KEY DECART_API_KEY
+# ELEVENLABS_API_KEY GOOGLE_MAPS_API_KEY HELIUS_RPC_URL GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET …
