@@ -36,7 +36,7 @@ tests/              unit + e2e
 
 ## Playing the dev build
 
-Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints (phone). URL params for QA: `?scene=valley|street|sutro|butterfly`, `?cell=<id>` (Marble cell), `?cam=actor|director|producer`, `?physics=1`, `?mission=1|2` (auto-brief), `?vehicle=1` (start in the lowrider), `?beat=1` (hydraulics on the beat), `?perf=1`, `?tier=desktop|phone|quest|fallback`.
+Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints (phone). URL params for QA: `?scene=valley|street|sutro|butterfly`, `?cell=<id>` (Marble cell), `?cam=actor|director|producer`, `?physics=1`, `?mission=1|2` (auto-brief), `?vehicle=1` (start in the lowrider), `?beat=1` (hydraulics on the beat), `?say=camera low, follow the car` (a direction once the world is up), `?perf=1`, `?tier=desktop|phone|quest|fallback`.
 
 | Do                                             | Keyboard / mouse                                                                                       | Touch                   | Gamepad         |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------- | --------------- |
@@ -48,6 +48,7 @@ Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints 
 | Talk to the Photographer → mission             | she walks up to you (blue NPC); the extras greet in passing — subtitles at the bottom                  | same                    | same            |
 | Action / cut a take · replay the set           | Enter · P (every take of the mission performs together)                                                | ACTION                  | Start           |
 | Possess an NPC (play their part next take)     | V near them · V near the body that carries $COAST switches back                                        | BE                      | Back            |
+| Direct by saying it (typed until voice lands)  | `/` then e.g. _camera low, follow the car, golden hour, action_ · _put that there_ after two clicks    | SAY                     | —               |
 | Lowrider: get in / out                         | E next to it                                                                                           | GRAB→EXIT               | X               |
 | Drive · handbrake · hop                        | WASD · Shift · Space (Shift+Space = all four)                                                          | stick · HOP             | sticks · LB · A |
 | Hydraulic switches (hold)                      | I front · K back · J left · L right                                                                    | LIFT (front)            | d-pad           |
@@ -60,4 +61,4 @@ No headset? `?xrsim=1` on the dev server boots an emulated Quest 3 with an on-sc
 
 ## Status
 
-Milestone **M3 — actor mode** on sample worlds (see `docs/tasks.md`): Rapier physics with splat-derived ground, the character, props with put-that-there, the **lowrider** (raycast vehicle + hydraulics + beat grid), **NPCs on a runtime navmesh** (Recast/Detour crowd, loiter · approach · greet), the camera rig, and the **M3.5 vertical slice** (missions → takes → verdict → billboard/download). Marble cells (M2) wire in as soon as a World Labs key lands in `.env`.
+Milestone **M3 — actor mode** on sample worlds (see `docs/tasks.md`): Rapier physics with splat-derived ground, the character, props with put-that-there, the **lowrider** (raycast vehicle + hydraulics + beat grid), **NPCs on a runtime navmesh** (Recast/Detour crowd, loiter · approach · greet), **possession and multi-take blocking**, the **director's console** (typed directions → scene acts, the surface the voice model drives in M5), the camera rig, and the **M3.5 vertical slice** (missions → takes → verdict → billboard/download). Marble cells (M2) wire in as soon as a World Labs key lands in `.env`.

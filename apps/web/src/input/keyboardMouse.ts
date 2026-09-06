@@ -67,6 +67,7 @@ export class KeyboardMouseProvider implements InputProvider {
     out.action = out.action || this.edges.has('Enter') || this.edges.has('NumpadEnter');
     out.playback = out.playback || this.edges.has('KeyP');
     out.possess = out.possess || this.edges.has('KeyV');
+    out.say = out.say || this.edges.has('Slash');
     out.beatToggle = out.beatToggle || this.edges.has('KeyH');
     out.muteToggle = out.muteToggle || this.edges.has('KeyM');
     // Hydraulic switchbox (held): I front, K back, J left, L right.
@@ -102,11 +103,21 @@ export class KeyboardMouseProvider implements InputProvider {
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
-    if (e.code === 'Tab') e.preventDefault();
+    if (isTyping(e.target)) return; // the director's console owns the keyboard while it has focus
+    if (e.code === 'Tab' || e.code === 'Slash') e.preventDefault();
     if (!e.repeat) this.edges.add(e.code);
     this.down.add(e.code);
   };
-  private onKeyUp = (e: KeyboardEvent) => this.down.delete(e.code);
+  private onKeyUp = (e: KeyboardEvent) => {
+    if (isTyping(e.target)) return;
+    this.down.delete(e.code);
+  };
+
+  /** Forget every held key (a text field took focus: no stuck W after typing "wide"). */
+  releaseAll() {
+    this.down.clear();
+    this.edges.clear();
+  }
 
   private onPointerDown = (e: PointerEvent) => {
     if (e.pointerType === 'touch') return; // touch provider owns touch
@@ -150,4 +161,9 @@ export class KeyboardMouseProvider implements InputProvider {
     this.pointerNdc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.hasPointer = true;
   }
+}
+
+function isTyping(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 }

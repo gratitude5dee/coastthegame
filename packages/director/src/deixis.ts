@@ -32,6 +32,11 @@ export interface ResolveContext {
   lastMentioned?: string;
   /** Speaker forward vector (XZ) for left/right/behind/in_front in the speaker's frame. */
   speakerForward: [number, number];
+  /**
+   * The speaker's own object id (e.g. 'me'). Relations are viewer-relative — "behind the car" is the car's far side —
+   * except around the speaker: "in front of me" is along my forward, "behind me" is at my back.
+   */
+  speakerId?: string;
 }
 
 export type Source = 'hand' | 'pointer' | 'head' | 'selection' | 'last' | 'desc' | 'explicit' | 'none';
@@ -148,6 +153,8 @@ export function resolvePlace(ref: PlaceRef, ctx: ResolveContext): Resolution<[nu
   // right = forward × up in a Y-up right-handed frame: (fx,0,fz)×(0,1,0) = (-fz, 0, fx)
   const rx = -fz;
   const rz = fx;
+  // Around the speaker the depth axis flips: "behind the car" is its far side, "behind me" is at my back.
+  const depth = ctx.speakerId !== undefined && anchor.value === ctx.speakerId ? -1 : 1;
   let p: [number, number, number] = [ap[0], ap[1], ap[2]];
   switch (ref.relative.rel) {
     case 'left':
@@ -157,10 +164,10 @@ export function resolvePlace(ref: PlaceRef, ctx: ResolveContext): Resolution<[nu
       p = [ap[0] + rx * d, ap[1], ap[2] + rz * d];
       break;
     case 'behind':
-      p = [ap[0] + fx * d, ap[1], ap[2] + fz * d];
+      p = [ap[0] + fx * d * depth, ap[1], ap[2] + fz * d * depth];
       break;
     case 'in_front':
-      p = [ap[0] - fx * d, ap[1], ap[2] - fz * d];
+      p = [ap[0] - fx * d * depth, ap[1], ap[2] - fz * d * depth];
       break;
     case 'on_top':
       p = [ap[0], ap[1] + ctx.scene.radiusOf(anchor.value) * 2, ap[2]];

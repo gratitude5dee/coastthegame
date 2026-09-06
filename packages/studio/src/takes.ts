@@ -38,7 +38,9 @@ export type WorldEdit =
   | { t: number; kind: 'propPlace'; propId: string; pos: Vec3 }
   | { t: number; kind: 'propThrow'; propId: string; velocity: Vec3 }
   | { t: number; kind: 'propGrab' | 'propRelease'; propId: string }
-  | { t: number; kind: 'sdfPaint'; shape: 'sphere'; pos: Vec3; r: number; rgba: [number, number, number, number] };
+  | { t: number; kind: 'sdfPaint'; shape: 'sphere'; pos: Vec3; r: number; rgba: [number, number, number, number] }
+  /** A director's marker on the take timeline ("mark beat", DIR-2 `mark_beat`). */
+  | { t: number; kind: 'marker'; label: string };
 
 /**
  * `Omit` is not distributive over unions (it would collapse `WorldEdit` to `{ kind }`), so the recorder's input type is
@@ -197,6 +199,8 @@ function cloneEdit(t: number, e: WorldEditInput): WorldEdit {
         r: e.r,
         rgba: [e.rgba[0], e.rgba[1], e.rgba[2], e.rgba[3]],
       };
+    case 'marker':
+      return { t, kind: e.kind, label: e.label };
   }
 }
 

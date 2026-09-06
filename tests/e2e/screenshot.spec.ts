@@ -96,5 +96,44 @@ test('physics smoke: rapier + character controller step without errors', async (
   await page.waitForFunction(() => window.__coastStudio?.actorId === 'player' && window.__coastStudio.possessed === 2, null, {
     timeout: 30_000,
   });
+  // The director's console (DIR-1/DIR-2): a typed direction runs the same acts the voice model will call as tools.
+  const directed = await page.evaluate(() => window.__coastSay!('camera low, follow the car, golden hour').results.map((r) => r.ok));
+  expect(directed).toEqual([true, true, true]);
+  await page.waitForFunction(
+    () => window.__coastDirector?.follow === 'lowrider' && (window.__coastDirector?.shot.height ?? 9) < 0.6,
+    null,
+    {
+      timeout: 30_000,
+    },
+  );
+  await expect(page.locator('#coast-sub')).toContainText('✓ camera low');
+  expect(await page.locator('#hud').innerText()).toContain('time golden');
+  // "move the ball next to the car": a described object, a relative place — no pointing needed.
+  const moved = await page.evaluate(() => {
+    const r = window.__coastSay!('move the ball next to the car').results[0]!;
+    const g = window.__coastGame as {
+      props: { props: Map<string, { mesh: { position: { x: number; z: number } } }> };
+      vehicle: { position(): { x: number; z: number } };
+    };
+    const p = g.props.props.get(r.affected[0] ?? '')?.mesh.position;
+    const car = g.vehicle.position();
+    return { ok: r.ok, id: r.affected[0], d: p ? Math.hypot(p.x - car.x, p.z - car.z) : Infinity };
+  });
+  expect(moved.ok).toBe(true);
+  expect(moved.id).toMatch(/^ball/);
+  expect(moved.d).toBeLessThan(6);
+  // Ambiguity asks instead of acting: two crates match "the crate".
+  const asked = await page.evaluate(() => window.__coastSay!('delete the crate').results[0]);
+  expect(asked?.ok).toBe(false);
+  expect(asked?.question).toBe('this one?');
+  // The `/` bar: keys go to the input, not the character; Enter directs.
+  await page.keyboard.press('Slash');
+  await expect(page.locator('#coast-say')).toBeVisible();
+  await page.keyboard.type('pull out');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__coastDirector?.text === 'pull out' && window.__coastDirector.ok[0] === true, null, {
+    timeout: 30_000,
+  });
+  await expect(page.locator('#coast-say')).toBeHidden();
   expect(errors, errors.join('\n')).toHaveLength(0);
 });

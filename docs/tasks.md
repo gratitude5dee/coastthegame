@@ -50,8 +50,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 ## M5 — Director & voice (CAM-_, DIR-_)
 
 - [~] CameraRig modes + transitions ✓; **VR diorama producer mode (CAM-3)** ✓ world group at 1:12 on the table, physics paused (hand pick/place + write-back pending); XR rig moves `localFrame` (CAM-4) with snap turn + teleport
-- [ ] Realtime WebRTC client + ephemeral secrets + tool schema wiring + ghost preview/undo
-- [ ] Deixis resolver ≥40 unit tests; scripted voice suite (30 utterances, ≥27 pass)
+- [~] Realtime WebRTC client + ephemeral secrets + tool schema wiring + ghost preview/undo — **acts land** (`packages/director/src/executor.ts`: SceneAct → SceneOps with deixis resolution and the confidence gate; `grammar.ts`: the literal film-set grammar; `apps/web/src/director/console.ts`: the `/` bar, `?say=`, `__coastSay`); camera acts on the rig (shots, moves, lenses, follow / look at); the WebRTC client + ephemeral key (needs `OPENAI_API_KEY`) and the ghost preview for low-confidence acts pending
+- [~] Deixis resolver ≥40 unit tests; scripted voice suite (30 utterances, ≥27 pass) — 40 utterances pass through the grammar + executor (`tests/unit/grammar.test.ts`, `executor.test.ts`); the same suite against the real Realtime model is the nightly job (key pending)
 - [ ] Astra planner: mission → shot list; 12 curated missions
 
 ## M6 — Studio & generative video (STU-_, GEN-_)

@@ -46,7 +46,8 @@ export type SceneAct =
   | { op: 'camera'; shot?: ShotName; follow?: ObjectRef; move?: CameraMove; duration_ms?: number; lens_mm?: number; look_at?: ObjectRef }
   | { op: 'record'; action: 'start' | 'stop' }
   | { op: 'mark_beat'; label: string }
-  | { op: 'undo'; n?: number };
+  | { op: 'undo'; n?: number }
+  | { op: 'set_mode'; mode: RigMode };
 
 /** What the client wraps around every tool call before execution (DIR-1/DIR-3). */
 export interface ActEnvelope {
@@ -91,6 +92,7 @@ export const TOOL_MODES: Record<string, RigMode[]> = {
   record: ['director'],
   mark_beat: ['director', 'producer'],
   undo: ['director', 'producer'],
+  set_mode: ['actor', 'director', 'producer'], // "director" / "actor" / "producer" said out loud (§3.1 step 4)
 };
 
 const DEFS = {
@@ -241,6 +243,14 @@ const ALL_TOOLS = [
   tool('record', 'Start ("action") or stop ("cut") recording the current shot.', { action: { enum: ['start', 'stop'] } }, ['action']),
   tool('mark_beat', 'Drop a labelled marker on the timeline.', { label: { type: 'string' } }, ['label']),
   tool('undo', 'Undo the last n acts.', { n: { type: 'integer', minimum: 1 } }),
+  tool(
+    'set_mode',
+    'Switch the perspective: actor (first person), director (camera + takes), producer (world).',
+    {
+      mode: { enum: ['actor', 'director', 'producer'] },
+    },
+    ['mode'],
+  ),
 ];
 
 export const ALL_TOOL_NAMES = ALL_TOOLS.map((t) => t.name);

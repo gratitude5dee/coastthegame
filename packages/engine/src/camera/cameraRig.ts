@@ -6,7 +6,14 @@
  * In XR the rig must move the `localFrame` group instead of the camera (CAM-4) — the XR path is added in M3 (Quest).
  */
 import * as THREE from 'three';
-import { RIG_PRESETS, RIG_TRANSITION_MS, type RigMode, type RigParams } from './rig';
+import { RIG_PRESETS, RIG_TRANSITION_MS, SHOT_PRESETS, type RigMode, type RigParams, type ShotPreset } from './rig';
+
+export type CameraMoveName = 'push_in' | 'pull_out' | 'orbit' | 'crane_up' | 'crane_down' | 'dolly_left' | 'dolly_right';
+
+/** Vertical field of view of a full-frame lens (24 mm sensor height), degrees. */
+export function fovForLens(mm: number): number {
+  return (2 * Math.atan(12 / Math.max(4, mm)) * 180) / Math.PI;
+}
 
 export interface RigTarget {
   /** Feet position of the possessed actor. */
@@ -45,6 +52,13 @@ export class CameraRig {
   private from: RigParams;
   private to: RigParams;
   private t = 1; // transition progress 0..1
+  private transitionMs = RIG_TRANSITION_MS;
+  /** Camera roll (radians) for dutch angles, tweened with the shot. */
+  private roll = 0;
+  private rollFrom = 0;
+  private rollTo = 0;
+  /** An orbit move in flight: yaw sweeps `by` radians over `ms`. */
+  private orbit: { from: number; by: number; t: number; ms: number } | null = null;
   /** Look angles: yaw around Y, pitch around X (radians). Shared across modes so switching keeps the direction. */
   yaw = 0;
   pitch = 0;
@@ -73,7 +87,71 @@ export class CameraRig {
     this.from = { ...this.params };
     this.to = { ...RIG_PRESETS[mode] };
     this.t = 0;
+    this.transitionMs = RIG_TRANSITION_MS;
+    this.rollFrom = this.roll;
+    this.rollTo = 0;
+    this.orbit = null;
     this.initialised = false; // re-seed the follow smoothing so the tween owns the motion
+  }
+
+  /** Tween some parameters over `ms` without changing mode (shot presets, camera moves, lenses — CAM-6). */
+  tween(partial: Partial<RigParams>, ms = RIG_TRANSITION_MS, rollDeg?: number) {
+    this.from = { ...this.params };
+    this.to = { ...this.params, ...partial };
+    this.t = 0;
+    this.transitionMs = Math.max(1, ms);
+    this.rollFrom = this.roll;
+    if (rollDeg !== undefined) this.rollTo = (rollDeg * Math.PI) / 180;
+  }
+
+  /** A named shot ("camera low", "go wide"): distance / height / fov from SHOT_PRESETS, roll for the dutch. */
+  applyShot(name: ShotPreset['name'], ms = 600): boolean {
+    const shot = SHOT_PRESETS.find((s) => s.name === name);
+    if (!shot || this.mode === 'actor') return false;
+    this.zoom = 1;
+    this.tween({ distance: shot.distance, height: shot.height, fovDeg: shot.fovDeg }, ms, shot.rollDeg ?? 0);
+    return true;
+  }
+
+  /** A camera move over `ms`: push in / pull out / crane / dolly change the orbit, orbit sweeps the yaw. */
+  move(move: CameraMoveName, ms = 1500): boolean {
+    if (this.mode === 'actor') return false;
+    const p = this.params;
+    switch (move) {
+      case 'push_in':
+        this.tween({ distance: Math.max(0.6, p.distance * 0.55) }, ms);
+        break;
+      case 'pull_out':
+        this.tween({ distance: Math.min(40, p.distance * 1.8) }, ms);
+        break;
+      case 'crane_up':
+        this.tween({ height: p.height + 2.5 }, ms);
+        break;
+      case 'crane_down':
+        this.tween({ height: Math.max(0.3, p.height - 1.2) }, ms);
+        break;
+      case 'dolly_left':
+        this.tween({ shoulder: p.shoulder - 1.5 }, ms);
+        break;
+      case 'dolly_right':
+        this.tween({ shoulder: p.shoulder + 1.5 }, ms);
+        break;
+      case 'orbit':
+        this.orbit = { from: this.yaw, by: Math.PI / 2, t: 0, ms: Math.max(1, ms) };
+        break;
+    }
+    return true;
+  }
+
+  /** A lens by focal length (full-frame): 24 mm wide … 85 mm tight. */
+  lens(mm: number, ms = 400): boolean {
+    if (this.mode === 'actor') return false;
+    this.tween({ fovDeg: THREE.MathUtils.clamp(fovForLens(mm), 10, 100) }, ms);
+    return true;
+  }
+
+  get rollRad() {
+    return this.roll;
   }
 
   cycle(order: RigMode[] = ['actor', 'director', 'producer']) {
@@ -88,13 +166,20 @@ export class CameraRig {
 
   /** Apply look input and update the camera for this frame. */
   update(dt: number, camera: THREE.PerspectiveCamera, target: RigTarget, look: LookInput) {
-    // Transition tween (CAM-1: ≤300 ms)
+    // Transition tween (CAM-1: ≤300 ms for modes; shots and moves pick their own duration)
     if (this.t < 1) {
-      this.t = Math.min(1, this.t + (dt * 1000) / RIG_TRANSITION_MS);
+      this.t = Math.min(1, this.t + (dt * 1000) / this.transitionMs);
       const k = smoothstep(this.t);
       const keys: (keyof RigParams)[] = ['distance', 'height', 'shoulder', 'fovDeg', 'dampingTauS', 'dioramaScale'];
       for (const key of keys) this.params[key] = this.from[key] + (this.to[key] - this.from[key]) * k;
+      this.roll = this.rollFrom + (this.rollTo - this.rollFrom) * k;
       if (this.t >= 1) performance.mark('coast:mode-end');
+    }
+    if (this.orbit) {
+      const o = this.orbit;
+      o.t = Math.min(1, o.t + (dt * 1000) / o.ms);
+      this.yaw = o.from + o.by * smoothstep(o.t);
+      if (o.t >= 1) this.orbit = null;
     }
 
     this.yaw -= look.yaw;
@@ -143,5 +228,6 @@ export class CameraRig {
       .addScaledVector(UP, this.mode === 'producer' ? 0.5 : target.eyeHeight * 0.85)
       .addScaledVector(forward, this.mode === 'producer' ? 0 : 1.2);
     camera.lookAt(this.tmpLook);
+    if (this.roll !== 0) camera.rotateZ(this.roll);
   }
 }

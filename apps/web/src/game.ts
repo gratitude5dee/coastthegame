@@ -33,7 +33,11 @@ import {
   type HopPattern,
   type PlatformInfo,
   type RigMode,
+  type RigTarget,
+  type PropSpec,
   type VehicleInput,
+  DeixisBuffer,
+  type DeixisSample,
 } from '@coast/engine';
 import { BeatClock, type MeterSample } from '@coast/studio';
 import { newFrameInput, resetFrameInput, type FrameInput, type InputProvider } from './input/intents';
@@ -45,8 +49,10 @@ import { initPerf } from './perf';
 import { StudioSession } from './studio/session';
 import { Metronome } from './audio/metronome';
 import { Sfx } from './audio/sfx';
-import { NpcSystem, type NpcSpec } from './npc/npcs';
+import { NpcSystem, type Npc, type NpcSpec } from './npc/npcs';
 import { GhostActor } from './studio/ghosts';
+import type { CameraRequest, SceneOps, UtteranceOutcome } from '@coast/director';
+import { DirectorConsole, summarize } from './director/console';
 import { createSubtitles, type Subtitles } from './ui/subtitles';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
 
@@ -157,6 +163,14 @@ declare global {
     __coastPaint?: { count: number; strokes: number };
     __coastNpcs?: { count: number; nav: boolean; greets: number; photographer: [number, number, number] | null };
     __coastStudio?: { actorId: string; setSize: number; ghosts: number; state: string; possessed: number };
+    __coastDirector?: {
+      text: string;
+      ok: boolean[];
+      summary: string;
+      follow: string | null;
+      shot: { distance: number; height: number; fovDeg: number };
+    };
+    __coastSay?: (text: string) => UtteranceOutcome;
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -255,6 +269,12 @@ export class Game {
   private possessions = 0;
   /** Looks by actor id (for take ghosts): the player + every NPC identity spawned in this level. */
   private readonly looks = new Map<string, { color: number; name: string }>();
+  /** The director's console (`/`): typed directions → acts; the voice path drives the same executor (DIR-1). */
+  private director: DirectorConsole | null = null;
+  private readonly deixis = new DeixisBuffer();
+  /** What the follow camera is on when it is not the player: 'lowrider', a prop id or an NPC id (CAM-6 "follow the car"). */
+  private followId: string | null = null;
+  private typing = false;
   private billboard: THREE.Mesh | null = null;
   private billboardVideo: HTMLVideoElement | null = null;
   private readonly frustum = new THREE.Frustum();
@@ -326,6 +346,27 @@ export class Game {
     this.crosshair.style.cssText =
       'position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:#ffb54a;box-shadow:0 0 0 1px #0008;pointer-events:none;display:none';
     document.body.appendChild(this.crosshair);
+
+    if (!this.isShot) {
+      this.director = new DirectorConsole(document.body, this.sceneOps(), this.deixis, {
+        mode: () => this.rig.mode,
+        forward: () => {
+          const f = this.camera.getWorldDirection(this.tmpV);
+          return [f.x, f.z];
+        },
+        onOutcome: (text, outcome) => {
+          this.subtitles ??= createSubtitles(document.body);
+          this.subtitles.say('Director', summarize(outcome), 4500);
+          this.syncDirectorHook(text, outcome);
+          this.updateHint();
+        },
+        onFocus: (typing) => {
+          this.typing = typing;
+          this.kbm.releaseAll();
+        },
+      });
+      window.__coastSay = (text) => this.director!.say(text);
+    }
 
     if (this.isShot)
       document.getElementById('coast-load')?.remove(); // deterministic screenshots: no title card
@@ -439,6 +480,9 @@ export class Game {
     }
     if (this.identity !== PLAYER_IDENTITY) this.setIdentity(PLAYER_IDENTITY);
     this.looks.clear();
+    this.followId = null;
+    this.director?.close();
+    this.deixis.clear();
     window.__coastPhysics = false;
     window.__coastSteps = 0;
   }
@@ -668,6 +712,8 @@ export class Game {
     window.__coastPhysics = true;
     this.loadingScreen?.progress('physics', 1);
     this.updateHint();
+    const say = this.opts.params.get('say');
+    if (say && this.director) this.director.say(say); // QA: `?say=camera low, follow the car`
   }
 
   // ── WebXR (Quest 3 / Vision Pro): SparkXr session, frame-based rig, diorama producer ───────────────────────────
@@ -1023,6 +1069,7 @@ export class Game {
       this.simulate(dt);
       this.updateCamera(dt);
       this.updatePointer();
+      this.feedDeixis();
       this.metronome.tick(performance.now());
       this.pendingBeat = null; // consumed by this frame's meter sample
     }
@@ -1053,10 +1100,7 @@ export class Game {
         // VR has two perspectives: actor (life-size) and producer (the diorama). Director is a desktop/phone view.
         this.rig.setMode(this.rig.mode === 'producer' ? 'actor' : 'producer');
         this.setDiorama(this.rig.mode === 'producer');
-      } else {
-        this.rig.cycle(RIG_ORDER);
-        this.kbm.setPointerLockDesired(this.rig.mode === 'actor');
-      }
+      } else this.setRigMode(RIG_ORDER[(RIG_ORDER.indexOf(this.rig.mode) + 1) % RIG_ORDER.length]!);
       this.props?.select(null);
       this.updateHint();
     }
@@ -1089,6 +1133,7 @@ export class Game {
       this.syncPaintHook();
     }
     if (i.cancel) this.props?.select(null);
+    if (i.say && this.director && !this.inXr) this.director.toggle();
     if (i.muteToggle) {
       this.sfx.toggleMuted();
       this.updateHint();
@@ -1328,7 +1373,9 @@ export class Game {
       this.playerMesh.visible = false;
       this.updateStudio(feet);
     } else if (ch) {
-      this.rig.update(dt, this.camera, { feet, yaw: ch.yaw, eyeHeight: EYE_HEIGHT }, look);
+      const followed = this.followId && this.rig.mode !== 'actor' ? this.followTarget(this.followId) : null;
+      if (followed) this.rig.update(dt, this.camera, followed, look);
+      else this.rig.update(dt, this.camera, { feet, yaw: ch.yaw, eyeHeight: EYE_HEIGHT }, look);
       // Keep follow cameras above the terrain (low-angle shots may dip, never clip through the ground).
       if (this.ground && this.rig.mode !== 'actor') {
         const minY = groundHeightAt(this.ground, this.camera.position.x, this.camera.position.z) + 0.25;
@@ -1490,12 +1537,20 @@ export class Game {
     const ch = this.character;
     const npcs = this.npcs;
     if (!ch || !npcs || this.studio?.state === 'recording') return;
-    const feet = ch.feet(new THREE.Vector3());
-    const npc = npcs.nearest(feet, POSSESS_DISTANCE);
+    const npc = npcs.nearest(ch.feet(new THREE.Vector3()), POSSESS_DISTANCE);
     if (!npc) {
       this.hint = 'nobody within reach to possess';
       return;
     }
+    this.possessNpc(npc);
+  }
+
+  /** Swap bodies with `npc` (any distance — the director can say "be Rico" from across the block). */
+  private possessNpc(npc: Npc): boolean {
+    const ch = this.character;
+    const npcs = this.npcs;
+    if (!ch || !npcs || this.driving || this.inXr || this.studio?.state === 'recording') return false;
+    const feet = ch.feet(new THREE.Vector3());
     const was = npcs.swapIdentity(npc, this.identity, feet, ch.yaw);
     this.setIdentity(was.spec);
     ch.teleport(was.position);
@@ -1506,10 +1561,11 @@ export class Game {
     this.subtitles?.say(
       this.identity.name,
       this.identity.id === PLAYER_IDENTITY.id ? 'Back in my own shoes.' : `You're ${this.identity.name} now.`,
-      2500,
+      4000,
     );
     this.updateHint();
     this.syncNpcHook();
+    return true;
   }
 
   /** Wear an identity: the placeholder's colour and the take recorder's actor id follow it. */
@@ -1520,12 +1576,352 @@ export class Game {
     if (this.studio) this.studio.actorId = spec.id;
   }
 
+  /** Where the follow camera goes when it is on something other than the player (CAM-6 "follow the car"). */
+  private followTarget(id: string): RigTarget | null {
+    if (id === 'lowrider' && this.vehicle) {
+      return { feet: this.carFeet(this.tmpV).clone(), yaw: this.vehicle.yaw, eyeHeight: CAR_EYE_HEIGHT, followScale: CAR_FOLLOW };
+    }
+    const npc = this.npcs?.byId(id);
+    if (npc) return { feet: npc.mesh.position.clone(), yaw: npc.mesh.rotation.y, eyeHeight: EYE_HEIGHT };
+    const prop = this.props?.props.get(id);
+    if (prop) return { feet: prop.mesh.position.clone(), yaw: this.rig.yaw, eyeHeight: 0.6 };
+    return null;
+  }
+
+  /** The thing under a ray: a prop, an NPC or the lowrider (ids the director's references resolve to). */
+  private pickAny(ray: THREE.Ray): string | null {
+    const prop = this.props?.pick(ray);
+    if (prop) return prop.spec.id;
+    const targets: THREE.Object3D[] = [];
+    if (this.npcs) for (const n of this.npcs.npcs) targets.push(n.mesh);
+    if (this.vehicle) targets.push(this.vehicle.group);
+    if (!targets.length) return null;
+    this.raycaster.ray.copy(ray);
+    const hit = this.raycaster.intersectObjects(targets, true)[0];
+    if (!hit) return null;
+    let o: THREE.Object3D | null = hit.object;
+    while (o) {
+      if (this.vehicle && o === this.vehicle.group) return 'lowrider';
+      if (this.npcs && o.parent === this.world && this.npcs.npcs.some((n) => n.mesh === o)) return o.name;
+      o = o.parent;
+    }
+    return null;
+  }
+
+  /** One pointing sample per frame for the deixis buffer (DIR-3): what the pointer is on, the selection, the ground. */
+  private feedDeixis() {
+    const d = this.director;
+    if (!d || !this.physicsReady || this.diorama) return;
+    const ray = this.pointerRay();
+    const sample: DeixisSample = { t: performance.now() };
+    if (ray) {
+      const hit = this.pickAny(ray);
+      if (hit) sample.pointerHit = hit;
+      const g = this.groundHit(ray);
+      if (g) sample.groundPoint = [g.x, g.y, g.z];
+      if (this.input.pointerRay) sample.headHit = hit ?? undefined; // an XR ray counts as a pointed hand/head ray
+    }
+    if (this.props?.selected) sample.selection = this.props.selected.spec.id;
+    if (this.input.select) sample.clickEdge = true;
+    d.sample(sample, 3);
+  }
+
+  private setRigMode(mode: RigMode) {
+    if (this.inXr) return;
+    this.rig.setMode(mode);
+    this.kbm.setPointerLockDesired(mode === 'actor');
+    if (mode === 'actor') this.followId = null;
+  }
+
+  /** `__coastDirector`: the last direction's outcome, refreshed every frame with the live follow target and shot. */
+  private syncDirectorHook(text?: string, outcome?: UtteranceOutcome) {
+    const prev = window.__coastDirector;
+    window.__coastDirector = {
+      text: text ?? prev?.text ?? '',
+      ok: outcome ? outcome.results.map((r) => r.ok) : (prev?.ok ?? []),
+      summary: outcome ? summarize(outcome) : (prev?.summary ?? ''),
+      follow: this.followId,
+      shot: { distance: this.rig.params.distance, height: this.rig.params.height, fovDeg: this.rig.params.fovDeg },
+    };
+  }
+
+  /**
+   * What the director can do to this scene (goal.md DIR-2 acts, CAM-8 role partition): the same surface the voice
+   * model's tool calls land on. Ids: props ('crate_1'), 'lowrider', NPC ids, 'me'.
+   */
+  private sceneOps(): SceneOps {
+    const now = () => performance.now();
+    const propColor = (name: string): number | null => {
+      const table: Record<string, number> = {
+        red: 0xd11a2a,
+        'candy red': 0xc0102a,
+        blue: 0x2f6fd6,
+        green: 0x3ad98a,
+        yellow: 0xffd23f,
+        orange: 0xff8a2a,
+        purple: 0x8a4fd9,
+        pink: 0xff3fa4,
+        white: 0xf2ecdc,
+        black: 0x0b0a10,
+        gold: 0xffb54a,
+        golden: 0xffb54a,
+        chrome: 0xc9ced6,
+        silver: 0xc9ced6,
+        teal: 0x2ab7a9,
+        cyan: 0x3fd0ff,
+        grey: 0x8a8a8a,
+        gray: 0x8a8a8a,
+      };
+      return table[name] ?? null;
+    };
+    const ASSETS: Record<string, PropSpec> = {
+      crate: { id: '', shape: 'box', size: [0.35, 0.35, 0.35], color: 0xd9743a, mass: 3 },
+      box: { id: '', shape: 'box', size: [0.35, 0.35, 0.35], color: 0xd9743a, mass: 3 },
+      cone: { id: '', shape: 'cylinder', size: [0.22, 0.35], color: 0xff8a2a, mass: 1 },
+      can: { id: '', shape: 'cylinder', size: [0.12, 0.2], color: 0xff3fa4, mass: 0.6, tags: ['spray'] },
+      'spray can': { id: '', shape: 'cylinder', size: [0.12, 0.2], color: 0x3fd0ff, mass: 0.6, tags: ['spray'] },
+      ball: { id: '', shape: 'ball', size: [0.3], color: 0x9be34a, mass: 1.5 },
+      barrel: { id: '', shape: 'cylinder', size: [0.3, 0.45], color: 0x2f6fd6, mass: 8 },
+    };
+    const feetOf = (id: string): THREE.Vector3 | null => {
+      if (id === 'me') return this.driving ? this.carFeet(new THREE.Vector3()) : (this.character?.feet(new THREE.Vector3()) ?? null);
+      if (id === 'lowrider') return this.vehicle ? this.carFeet(new THREE.Vector3()) : null;
+      const npc = this.npcs?.byId(id);
+      if (npc) return npc.mesh.position.clone();
+      const prop = this.props?.props.get(id);
+      return prop ? prop.mesh.position.clone() : null;
+    };
+    const propOf = (id: string) => this.props?.props.get(id) ?? null;
+    return {
+      byDescription: (desc) => {
+        const d = desc
+          .toLowerCase()
+          .replace(/^(the|a|an|my|our)\s+/, '')
+          .trim();
+        if (/^(me|myself|player|coast|\$coast)$/.test(d)) return ['me'];
+        if (/car|lowrider|ride|whip|impala/.test(d)) return this.vehicle ? ['lowrider'] : [];
+        const out: string[] = [];
+        for (const n of this.npcs?.npcs ?? []) {
+          if (n.spec.name.toLowerCase() === d || n.spec.id === d || d.includes(n.spec.name.toLowerCase())) out.push(n.spec.id);
+        }
+        if (out.length) return out;
+        if (/photographer|tutor|npc|extra|somebody|someone/.test(d)) return (this.npcs?.npcs ?? []).map((n) => n.spec.id);
+        const me = feetOf('me');
+        const props = [...(this.props?.props.values() ?? [])].filter((p) => {
+          const kind = p.spec.id.replace(/_\d+$/, '');
+          return (
+            p.spec.id === d ||
+            kind === d ||
+            d.includes(kind) ||
+            (p.spec.tags ?? []).some((t) => d.includes(t)) ||
+            (/box/.test(d) && kind === 'crate')
+          );
+        });
+        if (me) props.sort((a, b) => a.mesh.position.distanceTo(me) - b.mesh.position.distanceTo(me));
+        return props.map((p) => p.spec.id);
+      },
+      positionOf: (id) => {
+        const f = feetOf(id);
+        return f ? [f.x, f.y, f.z] : undefined;
+      },
+      radiusOf: (id) => {
+        if (id === 'lowrider') return this.vehicle?.boundingSphere(this.subjectSphere).radius ?? 2.4;
+        const prop = propOf(id);
+        if (prop) {
+          if (!prop.mesh.geometry.boundingSphere) prop.mesh.geometry.computeBoundingSphere();
+          return prop.mesh.geometry.boundingSphere?.radius ?? 0.5;
+        }
+        return 0.5;
+      },
+      move: (id, pos) => {
+        const props = this.props;
+        const prop = propOf(id);
+        if (props && prop) {
+          const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
+          if (this.ground) p.y = Math.max(p.y, groundHeightAt(this.ground, p.x, p.z));
+          props.select(prop);
+          props.placeSelectedAt(p);
+          this.studio?.edit(now(), { kind: 'propPlace', propId: id, pos: [p.x, p.y, p.z] });
+          this.sfx.tick(900);
+          return true;
+        }
+        if (id === 'lowrider' && this.vehicle && !this.driving) {
+          const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
+          if (this.ground) p.y = groundHeightAt(this.ground, p.x, p.z);
+          this.vehicle.teleport(p.add(new THREE.Vector3(0, 1.2, 0)), this.vehicle.yaw);
+          return true;
+        }
+        return false;
+      },
+      rotate: (id, yawDeg, faceId) => {
+        const from = feetOf(id);
+        if (!from) return false;
+        let yaw: number;
+        if (faceId) {
+          const to = feetOf(faceId);
+          if (!to) return false;
+          yaw = Math.atan2(-(to.x - from.x), -(to.z - from.z));
+        } else yaw = (yawDeg ?? 90) * (Math.PI / 180);
+        const prop = propOf(id);
+        if (prop) {
+          const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+          if (!faceId)
+            q.multiply(
+              new THREE.Quaternion(prop.body.rotation().x, prop.body.rotation().y, prop.body.rotation().z, prop.body.rotation().w),
+            );
+          prop.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+          prop.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          return true;
+        }
+        const npc = this.npcs?.byId(id);
+        if (npc) {
+          npc.facing = faceId ? yaw : npc.facing + yaw;
+          npc.faceTarget = null;
+          return true;
+        }
+        if (id === 'lowrider' && this.vehicle && !this.driving) {
+          this.vehicle.teleport(this.vehicle.position(new THREE.Vector3()), faceId ? yaw : this.vehicle.yaw + yaw);
+          return true;
+        }
+        return false;
+      },
+      scale: (id, factor) => {
+        const props = this.props;
+        const prop = propOf(id);
+        if (!props || !prop || !(factor > 0)) return false;
+        const t = prop.body.translation();
+        const yaw = new THREE.Euler().setFromQuaternion(prop.mesh.quaternion, 'YXZ').y;
+        const spec: PropSpec = { ...prop.spec, size: prop.spec.size.map((v) => v * factor), mass: (prop.spec.mass ?? 1) * factor ** 3 };
+        props.remove(id);
+        const base = this.ground ? groundHeightAt(this.ground, t.x, t.z) : t.y - 0.5;
+        props.spawn(spec, new THREE.Vector3(t.x, base + (spec.size[1] ?? spec.size[0] ?? 0.3) + 0.05, t.z), yaw);
+        return true;
+      },
+      remove: (id) => {
+        const props = this.props;
+        if (!props || !propOf(id)) return false;
+        if (props.grabbed?.spec.id === id) props.release(null);
+        props.remove(id);
+        this.sfx.tick(400);
+        return true;
+      },
+      setMaterial: (id, color) => {
+        const hex = propColor(color);
+        if (hex === null) return false;
+        const prop = propOf(id);
+        if (prop) {
+          (prop.mesh.material as THREE.MeshStandardMaterial).color.setHex(hex);
+          return true;
+        }
+        const npc = this.npcs?.byId(id);
+        if (npc) {
+          npc.capsule.material.color.setHex(hex);
+          return true;
+        }
+        return false;
+      },
+      spawn: (asset, pos) => {
+        const props = this.props;
+        const key = Object.keys(ASSETS).find((k) => asset === k || asset.includes(k));
+        if (!props || !key) return null;
+        const spec = { ...ASSETS[key]!, id: props.nextId(key.replace(/\s+/g, '')) };
+        const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
+        if (this.ground) p.y = groundHeightAt(this.ground, p.x, p.z);
+        p.y += (spec.size[1] ?? spec.size[0] ?? 0.3) + 0.3;
+        props.spawn(spec, p);
+        this.sfx.tick(1100);
+        return spec.id;
+      },
+      setTime: (preset) => {
+        const map: Record<string, TimePreset> = { golden: 'golden', blue: 'blue', night: 'night', fog_noon: 'noon' };
+        const t = map[preset];
+        if (!t) return false;
+        this.timePreset = t;
+        this.splat?.recolor.copy(TIME_PRESETS[t]);
+        return true;
+      },
+      setWeather: () => false, // fog volumes / rain land with the Marble cells (M2, W-5)
+      possess: (id) => {
+        if (!this.npcs) return false;
+        if (id === 'me') {
+          if (this.identity.id === PLAYER_IDENTITY.id) return true; // already me
+          const body = this.npcs.byId(PLAYER_IDENTITY.id);
+          return body ? this.possessNpc(body) : false;
+        }
+        if (id === this.identity.id) return true;
+        const npc = this.npcs.byId(id);
+        return npc ? this.possessNpc(npc) : false;
+      },
+      playAnim: () => false, // clips arrive with the skinned rigs (M4)
+      replay: () => {
+        const studio = this.studio;
+        if (!studio || studio.set.size === 0) return false;
+        studio.startPlayback(now(), true);
+        return true;
+      },
+      record: (action) => {
+        const studio = this.studio;
+        if (!studio) return false;
+        if (action === 'start') {
+          if (studio.state === 'verdict' && studio.takesUsed < studio.mission.takesMax) studio.retake();
+          if (!studio.canRoll) return false;
+        } else if (studio.state !== 'recording') return false;
+        const r = studio.action(this.frameContext());
+        if (r !== 'ignored') this.sfx.clapper();
+        return r !== 'ignored';
+      },
+      markBeat: (label) => {
+        if (this.studio?.state !== 'recording') return false;
+        this.studio.edit(now(), { kind: 'marker', label });
+        this.sfx.tick(1400);
+        return true;
+      },
+      undo: (n) => {
+        let count = 0;
+        for (let i = 0; i < n; i++) {
+          if (this.props?.undo())
+            count++; // the director's acts are mostly moves; the spray can has its own Z
+          else if (this.painter?.undo()) count++;
+          else break;
+        }
+        return count;
+      },
+      camera: (req: CameraRequest) => {
+        if (this.inXr) return false;
+        if (this.rig.mode === 'actor') this.setRigMode('director'); // "camera low" from first person: over the shoulder first
+        let ok = false;
+        if (req.followId !== undefined) {
+          this.followId = req.followId === 'me' ? null : req.followId;
+          ok = true;
+        }
+        if (req.shot) ok = this.rig.applyShot(req.shot) || ok;
+        if (req.move) ok = this.rig.move(req.move, req.durationMs ?? 1500) || ok;
+        if (req.lensMm !== undefined) ok = this.rig.lens(req.lensMm) || ok;
+        if (req.lookAtId) {
+          const subject = feetOf(this.followId ?? 'me');
+          const target = feetOf(req.lookAtId);
+          if (subject && target && subject.distanceTo(target) > 0.1) {
+            this.rig.yaw = Math.atan2(-(target.x - subject.x), -(target.z - subject.z));
+            ok = true;
+          }
+        }
+        return ok;
+      },
+      setMode: (mode) => {
+        if (this.inXr) return false;
+        this.setRigMode(mode);
+        return true;
+      },
+    };
+  }
+
   private npcNearby() {
     if (!this.character || !this.npcs) return null;
     return this.npcs.nearest(this.character.feet(this.tmpV), POSSESS_DISTANCE);
   }
 
   private syncStudioHook() {
+    if (this.director) this.syncDirectorHook();
     const s = this.studio;
     window.__coastStudio = {
       actorId: this.identity.id,
@@ -1619,8 +2015,10 @@ export class Game {
       this.hint =
         'click to lock the mouse · WASD · Space jump · Shift sprint · E grab / get in the car · click a prop then the ground = put that there';
     else if (this.rig.mode === 'director')
-      this.hint = 'drag to orbit · wheel zoom · WASD move · E grab / get in the car · click a prop then the ground = put that there';
-    else this.hint = 'overhead: drag to orbit · wheel zoom · click a prop, then click where it goes';
+      this.hint =
+        (this.followId ? `following ${this.followId} · ` : '') +
+        'drag to orbit · wheel zoom · WASD move · E grab / get in the car · click a prop then the ground = put that there · / say "camera low, follow the car"';
+    else this.hint = 'overhead: drag to orbit · wheel zoom · click a prop, then click where it goes · / say "put that there"';
   }
 
   private renderHud() {
@@ -1639,6 +2037,6 @@ export class Game {
         ? ` · lowrider ${Math.round(Math.abs(this.vehicle.speed) * 3.6)} km/h · ${this.vehicle.wheelsOnGround}/4 wheels down`
         : '') +
       (this.autoHop ? ` · beat ● ${this.beat.phase(performance.now()).bar + 1}.${this.beat.phase(performance.now()).beatInBar + 1}` : '') +
-      `<br>mode <b>${this.rig.mode}</b> (Tab) · time <b>${this.timePreset}</b> (T) · scenes 1–4 · C collider · R reset · M ${this.sfx.isMuted ? 'unmute' : 'mute'}<br><span style="opacity:.8">${this.hint}</span>`;
+      `<br>mode <b>${this.rig.mode}</b> (Tab) · time <b>${this.timePreset}</b> (T) · / direct · scenes 1–4 · C collider · R reset · M ${this.sfx.isMuted ? 'unmute' : 'mute'}<br><span style="opacity:.8">${this.hint}</span>`;
   }
 }
