@@ -103,7 +103,8 @@ let timePreset: TimePreset = 'noon';
 
 // ── Rig mode preview (goal.md CAM-1): only the FOV changes until the CameraRig lands in M3.5 ──
 const RIG_ORDER: RigMode[] = ['actor', 'director', 'producer'];
-let rigMode: RigMode = ((params.get('cam') ?? 'director') in RIG_PRESETS ? params.get('cam') : 'director') as RigMode;
+const camParam = params.get('cam') ?? 'director';
+let rigMode: RigMode = (camParam in RIG_PRESETS ? camParam : 'director') as RigMode;
 camera.fov = RIG_PRESETS[rigMode].fovDeg;
 camera.updateProjectionMatrix();
 

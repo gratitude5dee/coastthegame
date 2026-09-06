@@ -34,3 +34,13 @@ for (const shot of SHOTS) {
     expect(rendered).toBeGreaterThan(1000);
   });
 }
+
+// The bare landing URL (no params) must boot — a regression here shipped as "stuck at loading" (rig-mode lookup on null).
+test('boots the bare landing URL without page errors', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/?tier=desktop');
+  await page.waitForFunction(() => (window as unknown as { __coastFrame?: number }).__coastFrame !== undefined && (window as unknown as { __coastFrame: number }).__coastFrame > 5, null, { timeout: 60_000 });
+  expect(errors, errors.join('\n')).toHaveLength(0);
+  expect(await page.locator('#hud').innerText()).toContain('M0 playground');
+});
