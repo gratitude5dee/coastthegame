@@ -15,6 +15,7 @@ export class KeyboardMouseProvider implements InputProvider {
   private wheel = 0;
   private dragging = false;
   private clickEdge = false;
+  private buttonDown = false;
   private pointerNdc = new THREE.Vector2();
   private hasPointer = false;
   private wantLock = false;
@@ -28,7 +29,10 @@ export class KeyboardMouseProvider implements InputProvider {
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
-    window.addEventListener('blur', () => this.down.clear());
+    window.addEventListener('blur', () => {
+      this.down.clear();
+      this.buttonDown = false;
+    });
     document.addEventListener('pointerlockchange', () => {
       if (document.pointerLockElement !== canvas) this.wantLock = false;
     });
@@ -78,6 +82,7 @@ export class KeyboardMouseProvider implements InputProvider {
     }
     if (this.wheel !== 0) out.zoom *= Math.exp(this.wheel * 0.0015);
     if (this.clickEdge) out.select = true;
+    out.primaryHeld = out.primaryHeld || this.buttonDown;
     if (this.hasPointer) out.pointer = this.pointerNdc.clone();
 
     this.lookDx = this.lookDy = this.wheel = 0;
@@ -104,6 +109,7 @@ export class KeyboardMouseProvider implements InputProvider {
   private onPointerDown = (e: PointerEvent) => {
     if (e.pointerType === 'touch') return; // touch provider owns touch
     if (e.button !== 0) return;
+    this.buttonDown = true;
     this.updateNdc(e);
     if (this.wantLock && document.pointerLockElement !== this.canvas) {
       this.canvas.requestPointerLock?.();
@@ -127,6 +133,7 @@ export class KeyboardMouseProvider implements InputProvider {
   };
   private onPointerUp = (e: PointerEvent) => {
     if (e.pointerType === 'touch') return;
+    if (e.button === 0) this.buttonDown = false;
     if (this.dragging) {
       this.dragging = false;
       if (this.movedWhileDown < 6) this.clickEdge = true; // a click, not a drag

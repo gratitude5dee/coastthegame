@@ -78,6 +78,7 @@ export class XrControllerProvider implements InputProvider {
       if (edge('L5', pressed(L, 5))) out.action = true; // Y
       if (edge('L3', pressed(L, 3))) out.beatToggle = true;
       if (edge('L0', pressed(L, 0))) out.select = true; // trigger
+      out.primaryHeld = out.primaryHeld || pressed(L, 0);
     }
     if (R) {
       const x = dz(R.axes[2] ?? 0);
@@ -93,6 +94,7 @@ export class XrControllerProvider implements InputProvider {
       if (edge('R4', pressed(R, 4))) out.jump = true; // A
       if (edge('R5', pressed(R, 5))) out.modeCycle = true; // B
       if (edge('R0', pressed(R, 0))) out.select = true; // trigger
+      out.primaryHeld = out.primaryHeld || pressed(R, 0);
       if (edge('R1', pressed(R, 1))) out.throwEdge = true; // squeeze
       if (edge('R3', pressed(R, 3))) out.undo = true;
     }

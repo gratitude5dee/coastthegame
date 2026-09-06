@@ -13,6 +13,7 @@ import {
   Lowrider,
   PhysicsWorld,
   PropSystem,
+  SplatPainter,
   budgetsFor,
   dioramaPlacement,
   framePositionForHead,
@@ -135,6 +136,7 @@ declare global {
     __coastXr?: boolean;
     __coastXrSupported?: boolean;
     __coastDiorama?: boolean;
+    __coastPaint?: { count: number; strokes: number };
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -173,6 +175,10 @@ export class Game {
   private diorama = false;
   private readonly dioramaScale = 1 / 12;
   private teleportMarker: THREE.Mesh | null = null;
+  private painter: SplatPainter | null = null;
+  private spraying = false;
+  private readonly sprayColor = new THREE.Color();
+  private static readonly SPRAY_RANGE = 3.5;
   private readonly headLocal = new THREE.Vector3();
   private readonly headWorld = new THREE.Vector3();
   private readonly headQuat = new THREE.Quaternion();
@@ -357,6 +363,9 @@ export class Game {
       this.splat.dispose();
       this.splat = null;
     }
+    this.painter?.dispose();
+    this.painter = null;
+    this.spraying = false;
     this.physicsGen++;
     this.physicsReady = false;
     this.character = null;
@@ -494,6 +503,8 @@ export class Game {
     if (!performance.getEntriesByName('coast:interactive').length) performance.mark('coast:interactive'); // QB-3
     window.__coastReady = true;
     this.loadingScreen?.progress('fetch', 1);
+    this.painter = new SplatPainter(this.world, { maxSdfs: this.budgets.maxPaintSdfs });
+    window.__coastPaint = { count: 0, strokes: 0 };
     if (!this.isShot && (def.world || this.forcePhysics)) void this.initPhysics(def, cell);
   }
 
@@ -577,14 +588,25 @@ export class Game {
       { id: props.nextId('crate'), shape: 'box', size: [0.25, 0.25, 0.25], color: 0x4fa3d9, mass: 2 },
       at(3.2, 0.6, this.groundDelta(feet, f, 3.2, right, 0.6)),
     );
+    // Spray cans (W-4): grab one, then click / pull the trigger at the splats to tag them in the can's colour.
     props.spawn(
-      { id: props.nextId('can'), shape: 'cylinder', size: [0.12, 0.2], color: 0xff3fa4, mass: 0.6 },
+      { id: props.nextId('can'), shape: 'cylinder', size: [0.12, 0.2], color: 0xff3fa4, mass: 0.6, tags: ['spray'] },
       at(2.0, 1.4, this.groundDelta(feet, f, 2.0, right, 1.4)),
+    );
+    props.spawn(
+      { id: props.nextId('can'), shape: 'cylinder', size: [0.12, 0.2], color: 0x3fd0ff, mass: 0.6, tags: ['spray'] },
+      at(1.6, 1.9, this.groundDelta(feet, f, 1.6, right, 1.9)),
     );
     props.spawn(
       { id: props.nextId('ball'), shape: 'ball', size: [0.3], color: 0x9be34a, mass: 1.5 },
       at(4.5, -0.3, this.groundDelta(feet, f, 4.5, right, -0.3)),
     );
+
+    const grabParam = this.opts.params.get('grab');
+    if (grabParam) {
+      const target = props.props.get(grabParam);
+      if (target) props.grab(target); // QA: start holding a prop (e.g. grab=can_3 for the spray test)
+    }
 
     // The lowrider idles ahead and to the left, facing the same way (PHY-3). It drops onto its suspension.
     const carPos = feet.clone().addScaledVector(f, 5).addScaledVector(right, -3.5);
@@ -977,7 +999,11 @@ export class Game {
       for (const m of this.colliderMeshes) m.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).visible = this.debug) : null));
     }
     if (i.resetEdge) this.respawn();
-    if (i.undo) this.props?.undo();
+    if (i.undo) {
+      if (this.holdingSprayCan()) this.painter?.undo();
+      else this.props?.undo();
+      this.syncPaintHook();
+    }
     if (i.cancel) this.props?.select(null);
     if (i.beatToggle) {
       this.autoHop = !this.autoHop;
@@ -1032,6 +1058,26 @@ export class Game {
         .add(new THREE.Vector3(0, 3, 0));
       this.studio?.edit(performance.now(), { kind: 'propThrow', propId: props.grabbed.spec.id, velocity: [v.x, v.y, v.z] });
       props.release(v);
+    }
+
+    // Spray paint (W-4): holding a can, the primary button sprays along the pointer ray onto the splats — a click is one
+    // puff, holding it (pointer lock / XR trigger) lays a stroke. Throwing the can stays on F / right squeeze.
+    if (this.holdingSprayCan() && !this.diorama) {
+      const held = i.primaryHeld && (this.rig.mode === 'actor' || this.inXr); // in director mode a drag is the orbit
+      if (i.select || held) {
+        if (!this.spraying) {
+          this.spraying = true;
+          this.painter?.begin();
+        }
+        this.sprayAt(this.pointerRay());
+      } else if (this.spraying) {
+        this.spraying = false;
+        this.painter?.end();
+      }
+      if (i.select) return; // the click was the spray, not a select
+    } else if (this.spraying) {
+      this.spraying = false;
+      this.painter?.end();
     }
 
     // Put that there — click/tap fallback (DIR-3): click a prop to select, click the ground to place.
@@ -1254,6 +1300,34 @@ export class Game {
     return best;
   }
 
+  private holdingSprayCan(): boolean {
+    return !!this.props?.grabbed?.spec.tags?.includes('spray');
+  }
+
+  /** One puff where the ray meets the splats, within arm's reach of the can; logged into the take (ACT-2 sdfPaint). */
+  private sprayAt(ray: THREE.Ray | null) {
+    const painter = this.painter;
+    const can = this.props?.grabbed;
+    if (!painter || !can || !ray || !this.splat) return;
+    this.raycaster.ray.copy(ray);
+    const hits: THREE.Intersection[] = [];
+    this.splat.raycast(this.raycaster, hits);
+    hits.sort((a, b) => a.distance - b.distance);
+    const hit = hits[0];
+    // Arm's reach is measured from the hand (the can), not from a chase camera sitting metres behind the player.
+    if (!hit || hit.point.distanceTo(this.holdPoint()) > Game.SPRAY_RANGE) return;
+    this.sprayColor.setHex(can.spec.color);
+    const puff = painter.spray(hit.point, this.sprayColor, 0.22);
+    if (!puff) return;
+    this.studio?.edit(performance.now(), { kind: 'sdfPaint', shape: 'sphere', pos: puff.pos, r: puff.r, rgba: puff.rgba });
+    performance.mark('coast:spray');
+    this.syncPaintHook();
+  }
+
+  private syncPaintHook() {
+    if (this.painter) window.__coastPaint = { count: this.painter.count, strokes: this.painter.strokes.length };
+  }
+
   /** Distance from the player's feet to the lowrider's chassis (∞ without one). */
   private vehicleDistance(): number {
     if (!this.vehicle || !this.character) return Infinity;
@@ -1339,6 +1413,9 @@ export class Game {
         (this.studio?.state === 'recording' ? '● recording — Enter to cut · ' : '') +
         'WASD drive · Space hop · Shift brake (Shift+Space = all four) · I/K front/back · J/L sides · E get out' +
         beat;
+    else if (p?.grabbed && this.holdingSprayCan())
+      this.hint =
+        this.rig.mode === 'actor' ? 'hold click = spray the wall · Z undo · E drop · F throw' : 'click = spray · Z undo · E drop · F throw';
     else if (p?.grabbed) this.hint = 'E drop · F / click throw';
     else if (p?.selected) this.hint = 'click the ground = put it there · Esc cancel · Z undo';
     else if (this.studio?.state === 'recording') this.hint = '● recording — Enter to cut';

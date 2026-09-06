@@ -18,6 +18,7 @@ export interface Budgets {
   maxNpcs: number;
   residentCells: number; // active cell + nearest neighbour on every tier (goal.md W-3)
   dreamMode: boolean; // Lucy live restyle allowed
+  maxPaintSdfs: number; // spray-paint SDF spheres per cell (W-4) — each one is per-splat shader work every frame
 }
 
 export const BUDGETS: Record<Tier, Budgets> = {
@@ -34,6 +35,7 @@ export const BUDGETS: Record<Tier, Budgets> = {
     maxNpcs: 8,
     residentCells: 2,
     dreamMode: true,
+    maxPaintSdfs: 128,
   },
   quest: {
     targetFps: 72,
@@ -48,6 +50,7 @@ export const BUDGETS: Record<Tier, Budgets> = {
     maxNpcs: 4,
     residentCells: 2,
     dreamMode: false,
+    maxPaintSdfs: 48,
   },
   iphone: {
     targetFps: 60,
@@ -62,6 +65,7 @@ export const BUDGETS: Record<Tier, Budgets> = {
     maxNpcs: 5,
     residentCells: 2,
     dreamMode: false,
+    maxPaintSdfs: 48,
   },
   visionpro: {
     targetFps: 90,
@@ -76,6 +80,7 @@ export const BUDGETS: Record<Tier, Budgets> = {
     maxNpcs: 4,
     residentCells: 2,
     dreamMode: false,
+    maxPaintSdfs: 64,
   },
   android: {
     targetFps: 60,
@@ -90,6 +95,7 @@ export const BUDGETS: Record<Tier, Budgets> = {
     maxNpcs: 5,
     residentCells: 2,
     dreamMode: false,
+    maxPaintSdfs: 48,
   },
   fallback: {
     targetFps: 30,
@@ -104,6 +110,7 @@ export const BUDGETS: Record<Tier, Budgets> = {
     maxNpcs: 3,
     residentCells: 2,
     dreamMode: false,
+    maxPaintSdfs: 24,
   },
 };
 

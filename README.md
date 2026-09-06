@@ -43,6 +43,7 @@ Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints 
 | Move · look · sprint · jump                    | WASD · drag / pointer lock · Shift · Space                                                             | left stick · right drag | sticks · LB · A |
 | Actor / director / producer                    | Tab                                                                                                    | MODE                    | Y               |
 | Grab / drop · throw                            | E · F                                                                                                  | GRAB · tap              | X · B           |
+| Spray paint (holding a can)                    | click = puff · hold in actor mode = stroke · Z undo                                                    | tap                     | trigger         |
 | Put that there                                 | click a prop, then click the ground · Z undo                                                           | tap, tap                | — (voice in M5) |
 | Talk to the Photographer → mission             | walk up to the blue NPC                                                                                | same                    | same            |
 | Action / cut a take · replay                   | Enter · P                                                                                              | ACTION                  | Start           |

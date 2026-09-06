@@ -16,6 +16,7 @@ export interface FrameInput {
   interact: boolean; // edge — grab/release
   throwEdge: boolean; // edge
   select: boolean; // edge — click/tap at `pointer`
+  primaryHeld: boolean; // held — mouse button / XR trigger down (spray while holding a can)
   cancel: boolean; // edge — Escape / back
   undo: boolean; // edge
   modeCycle: boolean; // edge
@@ -52,6 +53,7 @@ export function newFrameInput(): FrameInput {
     interact: false,
     throwEdge: false,
     select: false,
+    primaryHeld: false,
     cancel: false,
     undo: false,
     modeCycle: false,
@@ -94,6 +96,7 @@ export function resetFrameInput(f: FrameInput) {
       false;
   f.sceneKey = null;
   f.sprint = false;
+  f.primaryHeld = false;
   f.pointerRay = null;
   f.snapTurn = 0;
   f.teleport = 'idle';

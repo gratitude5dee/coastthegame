@@ -92,3 +92,46 @@ test('lowrider: drive, hop, judged on the beat, get out', async ({ page }) => {
   });
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
+
+// Spray paint (goal.md W-4, golden path step 3): holding a can, a click at the splats lays an SDF puff in the can's
+// colour; Z undoes the stroke. The click lands on the butterfly's projected bounding-box centre, so no pixel guessing.
+test('spray paint: click tags the splats, undo clears it', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  await page.goto('/?scene=butterfly&physics=1&cam=director&grab=can_3&tier=desktop');
+  await page.waitForFunction(() => (window as unknown as { __coastPhysics?: boolean }).__coastPhysics === true, null, { timeout: 90_000 });
+  await page.waitForFunction(() => (window as unknown as { __coastLod?: boolean }).__coastLod === true, null, { timeout: 90_000 });
+  await expect(page.locator('#hud')).toContainText(/spray/i, { timeout: 30_000 });
+  // Let the LoD raycast index fill in (a few frames), then aim at the mesh origin (the butterfly sits on it).
+  const f0 = await page.evaluate(() => (window as unknown as { __coastFrame?: number }).__coastFrame ?? 0);
+  await page.waitForFunction((f) => ((window as unknown as { __coastFrame?: number }).__coastFrame ?? 0) >= f + 4, f0, { timeout: 90_000 });
+  const target = await page.evaluate(() => {
+    type V = { clone: () => V; project: (c: unknown) => { x: number; y: number } };
+    const g = (window as unknown as { __coastGame: { splat: { position: V }; camera: unknown } }).__coastGame;
+    const ndc = g.splat.position.clone().project(g.camera);
+    return { x: ((ndc.x + 1) / 2) * innerWidth, y: ((1 - ndc.y) / 2) * innerHeight };
+  });
+  const count = () => page.evaluate(() => (window as unknown as { __coastPaint?: { count: number } }).__coastPaint?.count ?? 0);
+  // One click = one puff. The LoD raycast index can lag a frame or two, so click until the first puff lands.
+  let puffs = 0;
+  for (let i = 0; i < 6 && puffs === 0; i++) {
+    await page.mouse.click(Math.round(target.x), Math.round(target.y));
+    const f1 = await page.evaluate(() => (window as unknown as { __coastFrame?: number }).__coastFrame ?? 0);
+    await page.waitForFunction((f) => ((window as unknown as { __coastFrame?: number }).__coastFrame ?? 0) >= f + 2, f1, {
+      timeout: 60_000,
+    });
+    puffs = await count();
+  }
+  expect(puffs).toBeGreaterThanOrEqual(1);
+  // Z undoes a stroke at a time.
+  for (let i = 0; i < 8 && (await count()) > 0; i++) {
+    await page.keyboard.press('KeyZ');
+    const f2 = await page.evaluate(() => (window as unknown as { __coastFrame?: number }).__coastFrame ?? 0);
+    await page.waitForFunction((f) => ((window as unknown as { __coastFrame?: number }).__coastFrame ?? 0) >= f + 2, f2, {
+      timeout: 60_000,
+    });
+  }
+  expect(await count()).toBe(0);
+  expect(errors, errors.join('\n')).toHaveLength(0);
+});
