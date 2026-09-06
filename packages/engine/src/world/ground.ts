@@ -18,7 +18,7 @@ export interface GroundOptions {
   /** Ignore splats larger than this (sky/background blobs). */
   maxScale?: number;
   center?: THREE.Vector3;
-  /** Discard cells whose ground is farther than this from the median (sky, floating debris). */
+  /** Discard cells whose ground is farther than this from their neighbourhood's median (sky, floating debris). */
   maxDeviation?: number;
 }
 
@@ -45,7 +45,7 @@ export function groundFromSplats(splat: SplatMesh, opts: GroundOptions = {}): Gr
   const minOpacity = opts.minOpacity ?? 0.35;
   const maxScale = opts.maxScale ?? 0.6;
   const center = opts.center ?? new THREE.Vector3();
-  const maxDeviation = opts.maxDeviation ?? 6;
+  const maxDeviation = opts.maxDeviation ?? 5;
 
   const cols = Math.max(2, Math.round((halfExtent * 2) / cellSize) + 1);
   const rows = cols;
@@ -80,9 +80,32 @@ export function groundFromSplats(splat: SplatMesh, opts: GroundOptions = {}): Gr
   }
   samples.sort((a, b) => a - b);
   const median = samples.length ? samples[Math.floor(samples.length / 2)]! : 0;
-  for (let i = 0; i < heights.length; i++) {
-    const h = heights[i]!;
-    if (!Number.isNaN(h) && Math.abs(h - median) > maxDeviation) heights[i] = Number.NaN;
+  // Outliers (sky, floating debris) are judged against the LOCAL neighbourhood, not the whole scan: real terrain can
+  // rise 10+ m across a block (the valley sample does), and a global ±maxDeviation test threw its floor away.
+  const raw = heights.slice();
+  const reach = 4;
+  const neigh: number[] = [];
+  for (let z = 0; z < rows; z++) {
+    for (let x = 0; x < cols; x++) {
+      const i = z * cols + x;
+      const h = raw[i]!;
+      if (Number.isNaN(h)) continue;
+      neigh.length = 0;
+      for (let dz = -reach; dz <= reach; dz++) {
+        const zz = z + dz;
+        if (zz < 0 || zz >= rows) continue;
+        for (let dx = -reach; dx <= reach; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= cols || (dx === 0 && dz === 0)) continue;
+          const v = raw[zz * cols + xx]!;
+          if (!Number.isNaN(v)) neigh.push(v);
+        }
+      }
+      if (neigh.length < 3) continue; // lonely cell: nothing to compare against, keep it
+      neigh.sort((a, b) => a - b);
+      const local = neigh[Math.floor(neigh.length / 2)]!;
+      if (Math.abs(h - local) > maxDeviation) heights[i] = Number.NaN;
+    }
   }
 
   // Coverage: where the scan actually has ground (2nd–98th percentile of sampled cells, so a few stray splats at the
