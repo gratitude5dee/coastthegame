@@ -21,6 +21,7 @@ import {
   type ConstraintResult,
   type MeterSample,
   type Mission,
+  type PropPose,
   type TakePose,
   type TakeV1,
   type Verdict,
@@ -48,6 +49,8 @@ export interface FrameContext {
   grounded: boolean;
   /** At the wheel of the lowrider (the pose is the car's). */
   driving?: boolean;
+  /** Awake props this frame (the recorder keeps the ones that move, ACT-2). */
+  props?: { id: string; pos: [number, number, number]; quat: [number, number, number, number] }[];
   camera: THREE.PerspectiveCamera;
   cameraHeightM: number;
   /** The current mission's subject (see `StudioSession.subjectId`) is inside the frustum. */
@@ -100,6 +103,9 @@ export class StudioSession {
     camQuat: [0, 0, 0, 1],
   };
   private readonly makeGhost: GhostFactory;
+  /** The game moves a prop to a replayed pose (kinematic replay of thrown / placed props, STU-1). */
+  propWriter: ((id: string, pose: PropPose) => void) | null = null;
+  private readonly propPose: PropPose = { t: 0, pos: [0, 0, 0], quat: [0, 0, 0, 1] };
   /** The game lends its renderer/scene/camera for an export (null on surfaces that cannot export, e.g. XR). */
   exportScene: (() => Omit<ExportScene, 'seek'>) | null = null;
   lastCutUrl: string | null = null;
@@ -274,6 +280,7 @@ export class StudioSession {
       camPos: [ctx.camera.position.x, ctx.camera.position.y, ctx.camera.position.z],
       camQuat: [q.x, q.y, q.z, q.w],
     });
+    if (ctx.props) for (const p of ctx.props) this.recorder.sampleProp(ctx.nowMs, p.id, p.pos, p.quat);
     const fwd = ctx.camera.getWorldDirection(new THREE.Vector3());
     const pitchDeg = (Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1)) * 180) / Math.PI;
     this.meter.push({
@@ -383,9 +390,20 @@ export class StudioSession {
 
   private updatePlayback(nowMs: number) {
     const t = setTime(nowMs, this.playbackStartMs, this.set.durationS, this.playbackLoop);
+    this.seekSet(t);
+  }
+
+  /** Put every ghost and every replayed prop where the set has them at time `t`. */
+  private seekSet(t: number) {
     for (let i = 0; i < this.ghosts.length; i++) {
       const pose = this.set.poseAt(i, t, this.ghostPose);
       if (pose) this.ghosts[i]!.setPose(pose);
+    }
+    if (this.propWriter) {
+      for (const id of this.set.propIds()) {
+        const p = this.set.propPoseAt(id, t, this.propPose);
+        if (p) this.propWriter(id, p);
+      }
     }
   }
 
@@ -419,10 +437,7 @@ export class StudioSession {
             }
           },
           seek: (t) => {
-            for (let i = 0; i < this.ghosts.length; i++) {
-              const pose = this.set.poseAt(i, t, this.ghostPose);
-              if (pose) this.ghosts[i]!.setPose(pose);
-            }
+            this.seekSet(t);
             const c = camLayer.player.poseAt(t, camPose);
             host.camera.position.set(c.camPos[0], c.camPos[1], c.camPos[2]);
             host.camera.quaternion.set(c.camQuat[0], c.camQuat[1], c.camQuat[2], c.camQuat[3]);

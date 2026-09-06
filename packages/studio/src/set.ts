@@ -7,7 +7,7 @@
  * Pure: no three.js, no DOM. The game gives each layer a ghost body and asks for poses; a layer whose take is shorter
  * than the set holds its last pose (an actor holding the mark), it never disappears mid-shot.
  */
-import { TakePlayer, type TakePose, type TakeV1, type WorldEdit } from './takes';
+import { TakePlayer, type PropPose, type TakePose, type TakeV1, type WorldEdit } from './takes';
 
 export interface SetLayer {
   readonly take: TakeV1;
@@ -68,6 +68,22 @@ export class TakeSet {
     const from = tS < l.lastT ? -Infinity : l.lastT;
     l.lastT = tS;
     return l.player.editsBetween(from, tS);
+  }
+
+  /** Every prop some layer moves; the newest layer's track wins when two takes moved the same prop. */
+  propIds(): string[] {
+    const ids = new Set<string>();
+    for (const l of this.layers) for (const id of l.player.propIds) ids.add(id);
+    return [...ids];
+  }
+
+  /** A prop's replayed pose at set time `tS` from the newest layer that moved it (null when none did). */
+  propPoseAt(id: string, tS: number, out?: PropPose): PropPose | null {
+    for (let i = this.layers.length - 1; i >= 0; i--) {
+      const p = this.layers[i]!.player.propPoseAt(id, tS, out);
+      if (p) return p;
+    }
+    return null;
   }
 
   /** Reset the edit cursors (a new playback run). */

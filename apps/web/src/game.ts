@@ -46,7 +46,7 @@ import { TouchProvider } from './input/touch';
 import { GamepadProvider } from './input/gamepad';
 import { XrControllerProvider } from './input/xrControllers';
 import { initPerf } from './perf';
-import { StudioSession } from './studio/session';
+import { StudioSession, type FrameContext } from './studio/session';
 import { Metronome } from './audio/metronome';
 import { Sfx } from './audio/sfx';
 import { NpcSystem, type Npc, type NpcSpec } from './npc/npcs';
@@ -1037,6 +1037,10 @@ export class Game {
     );
     studio.onClip = (url) => this.showClip(url);
     studio.actorId = this.identity.id;
+    studio.propWriter = (id, pose) => {
+      if (this.props?.grabbed?.spec.id === id) return; // the player is holding it: the live hand wins
+      this.props?.setPose(id, pose.pos, pose.quat);
+    };
     // Cut export (STU-3): the session borrows the renderer; the live loop pauses and the live body hides meanwhile.
     studio.exportScene = () => ({
       renderer: this.renderer,
@@ -2026,6 +2030,7 @@ export class Game {
       speed: car ? Math.abs(car.speed) : ch.speed,
       grounded: car ? car.wheelsOnGround >= 2 : ch.grounded,
       driving: !!car,
+      props: this.awakeProps(),
       camera: this.camera,
       cameraHeightM: camH,
       subjectInFrame: this.subjectInFrame(subject),
@@ -2033,6 +2038,19 @@ export class Game {
       cell: this.cellId ?? this.currentSceneId,
       ...(this.pendingBeat ? { beatEvent: this.pendingBeat.event, beatPhaseMs: this.pendingBeat.phaseMs } : {}),
     };
+  }
+
+  /** Poses of the props in motion this frame (the take keeps the ones that move; a resting crate costs nothing). */
+  private awakeProps(): NonNullable<FrameContext['props']> {
+    const out: NonNullable<FrameContext['props']> = [];
+    if (!this.props || this.studio?.state !== 'recording') return out;
+    for (const p of this.props.props.values()) {
+      if (p.body.isSleeping() && p !== this.props.grabbed) continue;
+      const t = p.body.translation();
+      const r = p.body.rotation();
+      out.push({ id: p.spec.id, pos: [t.x, t.y, t.z], quat: [r.x, r.y, r.z, r.w] });
+    }
+    return out;
   }
 
   /** Frustum test of the subject's bounding sphere (subjectInFrame constraint): a prop id or 'lowrider'. */

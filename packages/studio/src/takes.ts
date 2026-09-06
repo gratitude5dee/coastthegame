@@ -49,6 +49,19 @@ export type WorldEdit =
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 export type WorldEditInput = DistributiveOmit<WorldEdit, 't'> & { t?: number };
 
+/** A prop's pose while it moved during the take (ACT-2: "grabbed/thrown props with their rigid-body poses"). */
+export interface PropPose {
+  t: number;
+  pos: Vec3;
+  quat: Quat;
+}
+
+export interface PropTrack {
+  id: string;
+  /** Sorted by `t`; only stored while the prop moved, so a can that sits still costs nothing. */
+  samples: PropPose[];
+}
+
 export interface TakeV1 {
   v: 1;
   id: string;
@@ -65,6 +78,8 @@ export interface TakeV1 {
   samples: TakeSample[];
   /** Sorted by `t`, ascending. */
   worldEdits: WorldEdit[];
+  /** Pose tracks of the props that moved (replayed kinematically, STU-1). Absent on takes without moving props. */
+  props?: PropTrack[];
 }
 
 /** The interpolated pose `TakePlayer.poseAt` returns (the caller's `out` object when given). */
@@ -181,6 +196,16 @@ function emptySample(): TakeSample {
   return { t: 0, pos: [0, 0, 0], yaw: 0, speed: 0, grounded: false, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
 }
 
+/** ≥ 1 mm of travel or ≥ 0.5° of rotation since the last stored pose. */
+function propMoved(last: PropPose, pos: Vec3, quat: Quat): boolean {
+  const dx = pos[0] - last.pos[0];
+  const dy = pos[1] - last.pos[1];
+  const dz = pos[2] - last.pos[2];
+  if (dx * dx + dy * dy + dz * dz > 1e-6) return true;
+  const dot = Math.abs(last.quat[0] * quat[0] + last.quat[1] * quat[1] + last.quat[2] * quat[2] + last.quat[3] * quat[3]);
+  return dot < Math.cos((0.5 * Math.PI) / 360); // half-angle of 0.5°
+}
+
 function cloneEdit(t: number, e: WorldEditInput): WorldEdit {
   switch (e.kind) {
     case 'propPlace':
@@ -223,6 +248,7 @@ export class TakeRecorder {
   private lastStoredMs = -Infinity;
   private samples: TakeSample[] = [];
   private worldEdits: WorldEdit[] = [];
+  private props = new Map<string, { track: PropTrack; lastStoredMs: number; last: PropPose | null; pending: PropPose | null }>();
   /** Freshest input the rate limiter dropped since the last stored sample (reused buffer — allocation-free at 120 Hz). */
   private readonly pending = emptySample();
   private hasPending = false;
@@ -251,6 +277,7 @@ export class TakeRecorder {
     this.lastStoredMs = -Infinity;
     this.samples = [];
     this.worldEdits = [];
+    this.props = new Map();
     this.hasPending = false;
   }
 
@@ -267,6 +294,37 @@ export class TakeRecorder {
     copySample(this.pending, t, s);
     this.hasPending = true;
     return false;
+  }
+
+  /**
+   * Offer a prop's pose (rate-limited to `hz` per prop). Stored only when it moved since the last stored pose (≥ 1 mm
+   * or ≥ 0.5°) — call it every frame for every prop that is awake; a prop at rest never enters the take. The first
+   * stored pose of a prop is always kept, and `stop()` closes every track with the final pose so replays hold it.
+   */
+  sampleProp(nowMs: number, id: string, pos: Vec3, quat: Quat): boolean {
+    if (!this.isRecording) return false;
+    let entry = this.props.get(id);
+    if (!entry) {
+      entry = { track: { id, samples: [] }, lastStoredMs: -Infinity, last: null, pending: null };
+      this.props.set(id, entry);
+    }
+    const pose: PropPose = {
+      t: f32(this.elapsedS(nowMs)),
+      pos: [f32(pos[0]), f32(pos[1]), f32(pos[2])],
+      quat: [f32(quat[0]), f32(quat[1]), f32(quat[2]), f32(quat[3])],
+    };
+    entry.pending = pose; // the freshest offer closes the track at stop()
+    if (nowMs - entry.lastStoredMs < this.periodMs - 1) return false;
+    const last = entry.last;
+    if (last && !propMoved(last, pos, quat)) return false;
+    // Motion after a rest: pin the rest pose one period back, so the replay does not drift toward this sample early.
+    if (last && nowMs - entry.lastStoredMs > this.periodMs * 1.5) {
+      entry.track.samples.push({ t: f32(Math.max(last.t, pose.t - this.periodMs / 1000)), pos: [...last.pos], quat: [...last.quat] });
+    }
+    entry.track.samples.push(pose);
+    entry.last = pose;
+    entry.lastStoredMs = nowMs;
+    return true;
   }
 
   /** Log a world edit at `nowMs` (or at the explicit `e.t`, seconds from take start). Ignored when not recording. */
@@ -294,6 +352,19 @@ export class TakeRecorder {
     this.isRecording = false;
     this.hasPending = false;
     const worldEdits = this.worldEdits.slice().sort((a, b) => a.t - b.t);
+    const props: PropTrack[] = [];
+    for (const e of this.props.values()) {
+      if (e.track.samples.length === 0) continue;
+      let last = e.last!;
+      const p = e.pending;
+      if (p && p.t > last.t && propMoved(last, p.pos, p.quat)) {
+        e.track.samples.push(p); // the freshest pose the rate limiter dropped
+        last = p;
+      }
+      if (e.track.samples.length < 2) continue; // offered but never moved: not a track
+      if (durationS - last.t > this.periodMs / 2000) e.track.samples.push({ ...last, t: f32(durationS) }); // hold to the end
+      props.push(e.track);
+    }
     return {
       v: 1,
       id: this.id,
@@ -304,6 +375,7 @@ export class TakeRecorder {
       durationS,
       samples: this.samples,
       worldEdits,
+      ...(props.length ? { props } : {}),
     };
   }
 }
@@ -335,6 +407,7 @@ export class TakePlayer {
   readonly durationS: number;
   private readonly samples: readonly TakeSample[];
   private readonly edits: readonly WorldEdit[];
+  private readonly props: ReadonlyMap<string, PropTrack>;
   private cursor = 0;
 
   constructor(take: TakeV1) {
@@ -342,6 +415,55 @@ export class TakePlayer {
     this.durationS = take.durationS;
     this.samples = take.samples;
     this.edits = take.worldEdits.slice().sort((a, b) => a.t - b.t);
+    this.props = new Map((take.props ?? []).map((p) => [p.id, p]));
+  }
+
+  /** Ids of the props this take moves. */
+  get propIds(): string[] {
+    return [...this.props.keys()];
+  }
+
+  /**
+   * A moved prop's pose at `tS` (lerp / slerp between stored poses, held outside the sampled range); null when the
+   * take never moved that prop.
+   */
+  propPoseAt(id: string, tS: number, out?: PropPose): PropPose | null {
+    const track = this.props.get(id);
+    const s = track?.samples;
+    if (!s || s.length === 0) return null;
+    const o = out ?? { t: 0, pos: [0, 0, 0], quat: [0, 0, 0, 1] };
+    const copy = (p: PropPose) => {
+      o.t = p.t;
+      o.pos[0] = p.pos[0];
+      o.pos[1] = p.pos[1];
+      o.pos[2] = p.pos[2];
+      o.quat[0] = p.quat[0];
+      o.quat[1] = p.quat[1];
+      o.quat[2] = p.quat[2];
+      o.quat[3] = p.quat[3];
+      return o;
+    };
+    const first = s[0]!;
+    const last = s[s.length - 1]!;
+    if (!(tS > first.t)) return copy(first);
+    if (tS >= last.t) return copy(last);
+    let lo = 0;
+    let hi = s.length - 2;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (s[mid]!.t <= tS) lo = mid;
+      else hi = mid - 1;
+    }
+    const a = s[lo]!;
+    const b = s[lo + 1]!;
+    const span = b.t - a.t;
+    const u = span > 0 ? (tS - a.t) / span : 0;
+    o.t = tS;
+    o.pos[0] = lerp(a.pos[0], b.pos[0], u);
+    o.pos[1] = lerp(a.pos[1], b.pos[1], u);
+    o.pos[2] = lerp(a.pos[2], b.pos[2], u);
+    slerp(a.quat, b.quat, u, o.quat);
+    return o;
   }
 
   /**
@@ -445,6 +567,7 @@ export function encodeTake(take: TakeV1): Uint8Array {
     n,
     body: BODY_LAYOUT,
     worldEdits: take.worldEdits,
+    ...(take.props?.length ? { props: take.props } : {}),
   };
   const headerBytes = new TextEncoder().encode(JSON.stringify(header));
   const bytes = new Uint8Array(HEADER_PREFIX_BYTES + headerBytes.length + n * TAKE_BYTES_PER_SAMPLE);
@@ -542,6 +665,7 @@ export function decodeTake(bytes: Uint8Array): TakeV1 {
     durationS: typeof header.durationS === 'number' ? header.durationS : (samples[n - 1]?.t ?? 0),
     samples,
     worldEdits: Array.isArray(header.worldEdits) ? header.worldEdits : [],
+    ...(Array.isArray(header.props) && header.props.length ? { props: header.props } : {}),
   };
 }
 

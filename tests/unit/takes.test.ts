@@ -604,3 +604,61 @@ describe('takeStore', () => {
     expect(warn).toHaveBeenCalledTimes(3);
   });
 });
+
+describe('prop pose tracks (ACT-2 / STU-1: the replay re-throws the can)', () => {
+  const q = (deg: number): Quat => {
+    const h = (deg * Math.PI) / 360;
+    return [0, Math.sin(h), 0, Math.cos(h)];
+  };
+
+  it('records only while a prop moves (rate-limited per prop), holds the final pose, and replays it interpolated', () => {
+    const rec = new TakeRecorder({ actorId: 'player', cellVersion: 'v', idFactory: () => 't' });
+    rec.start(T0);
+    // A can at rest for a second: one sample (the first is always kept), then nothing.
+    for (let k = 0; k <= 60; k++) rec.sampleProp(T0 + k * (1000 / 60), 'can_1', [1, 0.2, 0], [0, 0, 0, 1]);
+    // Thrown at t = 1 s: it flies for a second.
+    for (let k = 0; k <= 60; k++) {
+      const t = 1 + k / 60;
+      rec.sampleProp(T0 + t * 1000, 'can_1', [1 + (t - 1) * 4, 0.2 + (t - 1) * 2, 0], q((t - 1) * 180));
+    }
+    rec.sample(T0, input(0));
+    const take = rec.stop(T0 + 3000);
+    expect(take.props).toHaveLength(1);
+    const track = take.props![0]!;
+    expect(track.id).toBe('can_1');
+    // 1 (rest) + ~30 (one second of flight at 30 Hz) + the hold at the end.
+    expect(track.samples.length).toBeGreaterThanOrEqual(30);
+    expect(track.samples.length).toBeLessThanOrEqual(34);
+    expect(track.samples[0]).toEqual({ t: 0, pos: [1, Math.fround(0.2), 0], quat: [0, 0, 0, 1] }); // float32, like the actor
+    expect(track.samples.at(-1)!.t).toBeCloseTo(3, 5);
+    expect(track.samples.at(-1)!.pos[0]).toBeCloseTo(5, 3);
+    const player = new TakePlayer(take);
+    expect(player.propIds).toEqual(['can_1']);
+    expect(player.propPoseAt('nope', 1)).toBeNull();
+    expect(player.propPoseAt('can_1', 0.5)!.pos).toEqual([1, Math.fround(0.2), 0]); // still at rest between the first two samples
+    const mid = player.propPoseAt('can_1', 1.5)!;
+    expect(mid.pos[0]).toBeCloseTo(3, 1);
+    expect(mid.pos[1]).toBeCloseTo(1.2, 1);
+    expect(Math.hypot(...mid.quat)).toBeCloseTo(1, 5);
+    expect(player.propPoseAt('can_1', 9)!.pos[0]).toBeCloseTo(5, 3); // held after the end
+  });
+
+  it('a prop that never moved leaves no track, and tracks survive the codec and a take without any', () => {
+    const rec = new TakeRecorder({ actorId: 'player', cellVersion: 'v', idFactory: () => 't' });
+    rec.start(T0);
+    rec.sample(T0, input(0));
+    for (let k = 0; k < 10; k++) rec.sampleProp(T0 + k * 40, 'crate_1', [0, 0, 0], [0, 0, 0, 1]);
+    rec.sampleProp(T0 + 500, 'ball_1', [0, 1, 0], [0, 0, 0, 1]);
+    rec.sampleProp(T0 + 600, 'ball_1', [0, 2, 0], [0, 0, 0, 1]);
+    const take = rec.stop(T0 + 1000);
+    expect(take.props!.map((p) => p.id)).toEqual(['ball_1']); // the crate was offered but never moved: no track
+    const back = decodeTake(encodeTake(take));
+    expect(back.props).toEqual(take.props);
+    const still = new TakeRecorder({ actorId: 'player', cellVersion: 'v', idFactory: () => 's' });
+    still.start(T0);
+    still.sample(T0, input(0));
+    const plain = still.stop(T0 + 100);
+    expect(plain.props).toBeUndefined();
+    expect(decodeTake(encodeTake(plain)).props).toBeUndefined();
+  });
+});

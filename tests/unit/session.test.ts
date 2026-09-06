@@ -168,4 +168,41 @@ describe('StudioSession mission loop', () => {
     expect(beat.pass).toBe(true); // 75% ≥ 60%
     expect(s.lastVerdict!.stars).toBe(3);
   });
+
+  it('props that moved during a take replay kinematically with the set (the replay re-throws the can)', async () => {
+    const s = makeSession();
+    const writes: [string, number][] = [];
+    s.propWriter = (id, pose) => writes.push([id, pose.pos[0]]);
+    s.brief();
+    const bad = { cameraHeightM: 1.8, subjectInFrame: false, timePreset: 'noon' as const };
+    expect(s.action(ctx(1000, bad))).toBe('rolled');
+    for (let i = 1; i <= 60; i++) {
+      const t = i / 30;
+      // The can flies +x for the first second, the crate never moves (awake but still).
+      s.tick(
+        ctx(1000 + t * 1000, {
+          ...bad,
+          props: [
+            { id: 'can_1', pos: [Math.min(t, 1) * 6, 1, 0], quat: [0, 0, 0, 1] },
+            { id: 'crate_1', pos: [2, 0, -3], quat: [0, 0, 0, 1] },
+          ],
+        }),
+      );
+    }
+    expect(s.action(ctx(3000, bad))).toBe('cut');
+    await new Promise((r) => setTimeout(r, 0));
+    const take = s.set.layers[0]!.take;
+    expect(take.props?.map((p) => p.id)).toEqual(['can_1']);
+    expect(s.set.propIds()).toEqual(['can_1']);
+    // The set loops after the cut: the can is written back along its track.
+    expect(writes.length).toBeGreaterThan(0); // startPlayback seeks t = 0 immediately
+    s.startPlayback(3000, true); // on the test clock
+    writes.length = 0;
+    s.tick(ctx(3500, bad)); // 0.5 s into the loop → x ≈ 3
+    expect(writes).toHaveLength(1);
+    expect(writes[0]![0]).toBe('can_1');
+    expect(writes[0]![1]).toBeCloseTo(3, 0);
+    s.tick(ctx(4800, bad)); // 1.8 s: held at the end of its flight
+    expect(writes.at(-1)![1]).toBeCloseTo(6, 1);
+  });
 });

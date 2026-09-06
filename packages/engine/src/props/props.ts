@@ -173,6 +173,21 @@ export class PropSystem {
     return true;
   }
 
+  /** Kinematic replay (STU-1): put a prop at a recorded pose — body, interpolation state and mesh at once. */
+  setPose(id: string, pos: [number, number, number], quat: [number, number, number, number]): boolean {
+    const p = this.props.get(id);
+    if (!p) return false;
+    p.body.setTranslation({ x: pos[0], y: pos[1], z: pos[2] }, true);
+    p.body.setRotation({ x: quat[0], y: quat[1], z: quat[2], w: quat[3] }, true);
+    p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    p.prevPos.set(pos[0], pos[1], pos[2]);
+    p.prevQuat.set(quat[0], quat[1], quat[2], quat[3]);
+    p.mesh.position.copy(p.prevPos);
+    p.mesh.quaternion.copy(p.prevQuat);
+    return true;
+  }
+
   undo(): boolean {
     const op = this.undoStack.pop();
     if (!op) return false;
