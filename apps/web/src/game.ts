@@ -14,6 +14,7 @@ import {
   PhysicsWorld,
   PropSystem,
   SplatPainter,
+  StrideTracker,
   budgetsFor,
   dioramaPlacement,
   flattestSpot,
@@ -26,6 +27,7 @@ import {
   tablePoint,
   yawOf,
   zeroVehicleInput,
+  HOP_CORNERS,
   type Cell,
   type GroundGrid,
   type HopPattern,
@@ -42,6 +44,7 @@ import { XrControllerProvider } from './input/xrControllers';
 import { initPerf } from './perf';
 import { StudioSession } from './studio/session';
 import { Metronome } from './audio/metronome';
+import { Sfx } from './audio/sfx';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
 
 export interface SceneDef {
@@ -203,6 +206,8 @@ export class Game {
   private lastCarYaw = 0;
   private readonly beat = new BeatClock();
   private readonly metronome = new Metronome(this.beat);
+  private sfx!: Sfx;
+  private readonly stride = new StrideTracker();
   private autoHop = false;
   private pendingBeat: { event: NonNullable<MeterSample['beatEvent']>; phaseMs: number } | null = null;
   private verdictAt = 0;
@@ -242,6 +247,10 @@ export class Game {
     this.forcePhysics = params.get('physics') === '1';
 
     this.camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.05, 2000);
+    this.sfx = new Sfx(this.camera, { muted: params.get('mute') === '1' || this.isShot });
+    // Audio starts on the first gesture (autoplay policy) — any key, click or touch.
+    const unlock = () => this.sfx.unlock();
+    for (const ev of ['keydown', 'pointerdown', 'touchstart'] as const) window.addEventListener(ev, unlock, { passive: true });
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.budgets.maxPixelRatio));
     this.renderer.setSize(innerWidth, innerHeight);
@@ -371,9 +380,12 @@ export class Game {
     this.physicsReady = false;
     this.character = null;
     if (this.vehicle) {
+      this.sfx.engineStop();
       this.vehicle.dispose();
       this.vehicle = null;
     }
+    this.sfx.spraySet(false);
+    this.stride.reset();
     this.vehicleSpawn = null;
     this.setDriving(false);
     this.autoHop = false;
@@ -620,6 +632,7 @@ export class Game {
     this.vehicle = new Lowrider(physics, { position: carPos, yaw: this.rig.yaw });
     this.vehicleSpawn = { pos: carPos.clone(), yaw: this.rig.yaw };
     this.world.add(this.vehicle.group);
+    this.sfx.engineStart(this.vehicle.group); // idles by the door (no-op until audio unlocks; retried per frame)
 
     this.setupStudio(feet, f, right);
 
@@ -1011,6 +1024,10 @@ export class Game {
       this.syncPaintHook();
     }
     if (i.cancel) this.props?.select(null);
+    if (i.muteToggle) {
+      this.sfx.toggleMuted();
+      this.updateHint();
+    }
     if (i.beatToggle) {
       this.autoHop = !this.autoHop;
       if (this.autoHop) this.metronome.enable(performance.now());
@@ -1028,6 +1045,7 @@ export class Game {
       else if (i.jump && this.vehicle) {
         this.vehicleInput.hop = this.hopPattern();
         this.pendingBeat = { event: 'hop', phaseMs: this.beat.phase(performance.now()).msToNearest };
+        this.sfx.hydraulic(HOP_CORNERS[this.vehicleInput.hop].length);
       }
     }
 
@@ -1036,6 +1054,7 @@ export class Game {
       if (i.action) {
         const r = this.studio.action(this.frameContext());
         if (r === 'ignored' && this.studio.state === 'idle') this.studio.card.setStatus('walk up to the photographer first');
+        else if (r !== 'ignored') this.sfx.clapper();
         this.updateHint();
       }
       if (i.playback) this.studio.togglePlayback(performance.now());
@@ -1046,6 +1065,7 @@ export class Game {
       if (props.grabbed) {
         this.studio?.edit(performance.now(), { kind: 'propRelease', propId: props.grabbed.spec.id });
         props.release(null);
+        this.sfx.tick(700);
       } else {
         const near = this.nearestProp(2.6);
         const carDist = this.vehicleDistance();
@@ -1054,6 +1074,7 @@ export class Game {
         } else if (near) {
           props.grab(near);
           this.studio?.edit(performance.now(), { kind: 'propGrab', propId: near.spec.id });
+          this.sfx.tick(1200);
         }
       }
     }
@@ -1159,9 +1180,11 @@ export class Game {
       for (const b of this.beat.crossed(now)) {
         const bpb = this.beat.grid.beatsPerBar;
         vi.hop = AUTO_HOP_PATTERN[(((b % bpb) + bpb) % bpb) % AUTO_HOP_PATTERN.length] ?? 'front';
+        this.sfx.hydraulic(HOP_CORNERS[vi.hop].length);
       }
     }
 
+    const jumped = !!charInput.jump && ch.grounded;
     physics.step(dt, (fixedDt) => {
       this.props?.beforeStep();
       this.vehicle?.beforeStep();
@@ -1173,6 +1196,18 @@ export class Game {
       if (this.props?.grabbed) this.props.updateGrabbed(this.holdPoint());
     });
     window.__coastSteps = physics.stepCount;
+    if (jumped) this.sfx.jump();
+    if (!driving) {
+      for (const ev of this.stride.update(ch.speed, ch.grounded, dt)) {
+        if (ev === 'step') this.sfx.footstep('grass', ch.speed, this.stride.foot as 0 | 1);
+        else this.sfx.land();
+      }
+    }
+    if (this.vehicle) {
+      this.sfx.engineStart(this.vehicle.group); // no-op once running; first call after the audio unlock starts it
+      this.sfx.engineUpdate(this.vehicle.speed, vi.throttle, driving);
+    }
+    this.sfx.spraySet(this.spraying);
     if (this.rig.mode === 'actor' && !driving && !this.inXr) ch.yaw = this.rig.yaw;
     this.props?.sync(physics.alpha);
     this.vehicle?.sync(physics.alpha);
@@ -1460,6 +1495,6 @@ export class Game {
         ? ` · lowrider ${Math.round(Math.abs(this.vehicle.speed) * 3.6)} km/h · ${this.vehicle.wheelsOnGround}/4 wheels down`
         : '') +
       (this.autoHop ? ` · beat ● ${this.beat.phase(performance.now()).bar + 1}.${this.beat.phase(performance.now()).beatInBar + 1}` : '') +
-      `<br>mode <b>${this.rig.mode}</b> (Tab) · time <b>${this.timePreset}</b> (T) · scenes 1–4 · C collider · R reset<br><span style="opacity:.8">${this.hint}</span>`;
+      `<br>mode <b>${this.rig.mode}</b> (Tab) · time <b>${this.timePreset}</b> (T) · scenes 1–4 · C collider · R reset · M ${this.sfx.isMuted ? 'unmute' : 'mute'}<br><span style="opacity:.8">${this.hint}</span>`;
   }
 }

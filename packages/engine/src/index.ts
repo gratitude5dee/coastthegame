@@ -11,3 +11,4 @@ export * from './props/props';
 export * from './vehicles/lowrider';
 export * from './xr/locomotion';
 export * from './world/paint';
+export * from './audio/stride';

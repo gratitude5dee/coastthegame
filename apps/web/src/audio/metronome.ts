@@ -3,6 +3,7 @@
  * BeatClock (accent on the one), so hop-on-the-beat has something to hop to. Created lazily on a user gesture
  * (autoplay policy); `tick()` once per frame keeps ~200 ms of clicks queued. No audio assets, ~1 kB.
  */
+import * as THREE from 'three';
 import type { BeatClock } from '@coast/studio';
 
 export class Metronome {
@@ -22,10 +23,7 @@ export class Metronome {
   enable(nowMs: number) {
     try {
       if (!this.ctx) {
-        const Ctx = (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext) as
-          typeof AudioContext | undefined;
-        if (!Ctx) return;
-        this.ctx = new Ctx();
+        this.ctx = THREE.AudioContext.getContext(); // one context for the whole game (three's listener shares it)
         this.gain = this.ctx.createGain();
         this.gain.gain.value = this.volume;
         this.gain.connect(this.ctx.destination);

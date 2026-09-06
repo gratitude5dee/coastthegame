@@ -51,7 +51,7 @@ Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints 
 | Drive · handbrake · hop                        | WASD · Shift · Space (Shift+Space = all four)                                                          | stick · HOP             | sticks · LB · A |
 | Hydraulic switches (hold)                      | I front · K back · J left · L right                                                                    | LIFT (front)            | d-pad           |
 | Hop on the beat (auto-hydraulics + click)      | H                                                                                                      | BEAT                    | RT              |
-| Time of day · collider debug · reset           | T · C · R                                                                                              | —                       | —               |
+| Time of day · collider debug · reset           | T · C · R · M mute                                                                                     | —                       | —               |
 | **Quest (WebXR)**: walk · snap turn · teleport | left stick · right stick flick · push right stick, release                                             | —                       | —               |
 | Quest: jump/hop · grab/car · action · diorama  | A · X · Y · B (select = trigger, throw = right squeeze, brake = left squeeze, beat = left stick press) | —                       | —               |
 
