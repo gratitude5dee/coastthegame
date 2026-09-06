@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host --port 4173",
     "typecheck": "tsc --noEmit",
-    "lint": "echo 'eslint (root config) — TODO M0'"
+    "lint": "echo 'linted at root'"
   },
   "dependencies": {
     "@coast/director": "workspace:*",

@@ -22,7 +22,9 @@ for (const shot of SHOTS) {
     // SwiftShader renders post-LoD frames at ~0.3–1 fps at 720p, so this stays cheap while being stable.
     await page.waitForFunction(() => (window as unknown as { __coastLod?: boolean }).__coastLod === true, null, { timeout: 90_000 });
     const start = (await page.evaluate(() => (window as unknown as { __coastFrame?: number }).__coastFrame)) ?? 0;
-    await page.waitForFunction((s) => ((window as unknown as { __coastFrame?: number }).__coastFrame ?? 0) >= s + 3, start, { timeout: 90_000 });
+    await page.waitForFunction((s) => ((window as unknown as { __coastFrame?: number }).__coastFrame ?? 0) >= s + 3, start, {
+      timeout: 90_000,
+    });
     await page.screenshot({ path: `tests/e2e/__screenshots__/${shot.name}.png` }); // human-viewable copy
     // toHaveScreenshot captures twice and requires stability; SwiftShader needs a long timeout. HUD text is masked.
     await expect(page).toHaveScreenshot(`${shot.name}.png`, { maxDiffPixelRatio: 0.02, timeout: 120_000, mask: [page.locator('#hud')] });
@@ -40,7 +42,13 @@ test('boots the bare landing URL without page errors', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto('/?tier=desktop');
-  await page.waitForFunction(() => (window as unknown as { __coastFrame?: number }).__coastFrame !== undefined && (window as unknown as { __coastFrame: number }).__coastFrame > 5, null, { timeout: 60_000 });
+  await page.waitForFunction(
+    () =>
+      (window as unknown as { __coastFrame?: number }).__coastFrame !== undefined &&
+      (window as unknown as { __coastFrame: number }).__coastFrame > 5,
+    null,
+    { timeout: 60_000 },
+  );
   expect(errors, errors.join('\n')).toHaveLength(0);
   expect(await page.locator('#hud').innerText()).toContain('M0 playground');
 });

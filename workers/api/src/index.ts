@@ -37,7 +37,14 @@ export default {
     const url = new URL(req.url);
     const origin = env.ALLOWED_ORIGIN ?? 'http://localhost:5173';
     if (req.method === 'OPTIONS' && url.pathname.startsWith('/api/')) {
-      return new Response(null, { status: 204, headers: { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'content-type,x-coast-session', 'access-control-allow-methods': 'GET,POST' } });
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'access-control-allow-origin': origin,
+          'access-control-allow-headers': 'content-type,x-coast-session',
+          'access-control-allow-methods': 'GET,POST',
+        },
+      });
     }
 
     if (url.pathname === '/api/health') return json({ ok: true, env: env.ENVIRONMENT, ts: Date.now() }, 200, origin);
@@ -54,7 +61,10 @@ export default {
         headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
         body: JSON.stringify({ session: { type: 'realtime', model } }),
       });
-      return new Response(await r.text(), { status: r.status, headers: { 'content-type': 'application/json', 'access-control-allow-origin': origin } });
+      return new Response(await r.text(), {
+        status: r.status,
+        headers: { 'content-type': 'application/json', 'access-control-allow-origin': origin },
+      });
     }
 
     // BE-3: real-device perf reports → R2 (docs/perf dashboard reads these). Size-capped + session-bound (no R2 spam).
@@ -85,7 +95,10 @@ export default {
 } satisfies ExportedHandler<Env, JobMessage>;
 
 export class SessionDO implements DurableObject {
-  constructor(private state: DurableObjectState, private env: Env) {}
+  constructor(
+    private state: DurableObjectState,
+    private env: Env,
+  ) {}
   async fetch(_req: Request): Promise<Response> {
     // TODO(M0): budget ledger {spentUsd, calls[]}; presence; takes index
     return json({ ok: true, id: this.state.id.toString(), cap: this.env.SESSION_SPEND_CAP_USD });

@@ -2,7 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DeixisBuffer, type DeixisSample } from '../../packages/engine/src/intents/intents';
-import { resolveObject, resolvePlace, nominalTime, pointingEvents, type SceneIndex, type ResolveContext } from '../../packages/director/src/deixis';
+import {
+  resolveObject,
+  resolvePlace,
+  nominalTime,
+  pointingEvents,
+  type SceneIndex,
+  type ResolveContext,
+} from '../../packages/director/src/deixis';
 import { toRealtimeTools, ALL_TOOL_NAMES, TOOL_MODES } from '../../packages/director/src/schema';
 
 /** A tiny scene index shared by fixtures. */
@@ -10,8 +17,7 @@ const scene: SceneIndex = {
   byDescription: (d) => (d.includes('car') ? ['car_red', 'car_blue'] : d.includes('truck') ? ['taco_truck'] : []),
   positionOf: (id) =>
     ({ car_red: [2, 0, 0], car_blue: [10, 0, 0], taco_truck: [0, 0, -5], can_red: [1, 0, 1], cone_orange: [3, 0, 3] })[id] as
-      | [number, number, number]
-      | undefined,
+      [number, number, number] | undefined,
   radiusOf: () => 1,
 };
 
@@ -32,7 +38,11 @@ interface Fixture {
   speech: { startMs: number; endMs: number };
   deicticTotal: number;
   buffer: DeixisSample[];
-  cases: { ref: unknown; kind: 'object' | 'place'; expect: { id?: string; pos?: number[]; minConfidence?: number; maxConfidence?: number; question?: string } }[];
+  cases: {
+    ref: unknown;
+    kind: 'object' | 'place';
+    expect: { id?: string; pos?: number[]; minConfidence?: number; maxConfidence?: number; question?: string };
+  }[];
 }
 const fixturesDir = join(__dirname, '../fixtures/deixis');
 const fixtures: Fixture[] = readdirSync(fixturesDir)
@@ -57,7 +67,8 @@ describe('deixis fixture suite', () => {
             correct++;
             continue;
           }
-          const ok = r.value === cs.expect.id && r.confidence >= (cs.expect.minConfidence ?? 0) && r.confidence <= (cs.expect.maxConfidence ?? 1);
+          const ok =
+            r.value === cs.expect.id && r.confidence >= (cs.expect.minConfidence ?? 0) && r.confidence <= (cs.expect.maxConfidence ?? 1);
           expect({ value: r.value, confidence: r.confidence, source: r.source }).toMatchObject({ value: cs.expect.id });
           if (cs.expect.minConfidence !== undefined) expect(r.confidence).toBeGreaterThanOrEqual(cs.expect.minConfidence);
           if (cs.expect.maxConfidence !== undefined) expect(r.confidence).toBeLessThanOrEqual(cs.expect.maxConfidence);
@@ -73,7 +84,6 @@ describe('deixis fixture suite', () => {
   }
   it('reports precision (QB-6 gate is ≥0.9 with pointer/hand, evaluated on the pointer/hand subset in M5)', () => {
     const precision = total ? correct / total : 0;
-    // eslint-disable-next-line no-console
     console.log(`deixis fixture precision: ${correct}/${total} = ${precision.toFixed(3)}`);
     expect(precision).toBeGreaterThanOrEqual(0.9);
   });
@@ -130,7 +140,12 @@ describe('source priority', () => {
       b.push({ t: 500, ...s });
       return ctx({ buffer: b, speech: { startMs: 0, endMs: 1000 }, deicticTotal: 1, lastMentioned: 'last_obj' });
     };
-    expect(resolveObject({ deictic: 'that' }, mk({ handHit: { hand: 'right', id: 'h', point: [0, 0, 0] }, pointerHit: 'p', headHit: 'g', selection: 's' })).source).toBe('hand');
+    expect(
+      resolveObject(
+        { deictic: 'that' },
+        mk({ handHit: { hand: 'right', id: 'h', point: [0, 0, 0] }, pointerHit: 'p', headHit: 'g', selection: 's' }),
+      ).source,
+    ).toBe('hand');
     expect(resolveObject({ deictic: 'that' }, mk({ pointerHit: 'p', headHit: 'g', selection: 's' })).source).toBe('pointer');
     expect(resolveObject({ deictic: 'that' }, mk({ headHit: 'g', selection: 's' })).source).toBe('head');
     expect(resolveObject({ deictic: 'that' }, mk({ selection: 's' })).source).toBe('selection');
@@ -158,7 +173,29 @@ describe('descriptions and relations', () => {
 
 describe('realtime tool schema (DIR-2 / CAM-8)', () => {
   it('exposes every act and query op from goal.md DIR-2', () => {
-    for (const n of ['query_scene', 'resolve_ref', 'get_shot_state', 'list_assets', 'spawn', 'move', 'rotate', 'scale', 'delete', 'set_material', 'group', 'ungroup', 'set_time', 'set_weather', 'play_anim', 'possess', 'replay_take', 'camera', 'record', 'mark_beat', 'undo'])
+    for (const n of [
+      'query_scene',
+      'resolve_ref',
+      'get_shot_state',
+      'list_assets',
+      'spawn',
+      'move',
+      'rotate',
+      'scale',
+      'delete',
+      'set_material',
+      'group',
+      'ungroup',
+      'set_time',
+      'set_weather',
+      'play_anim',
+      'possess',
+      'replay_take',
+      'camera',
+      'record',
+      'mark_beat',
+      'undo',
+    ])
       expect(ALL_TOOL_NAMES).toContain(n);
   });
   it('every tool has a mode assignment and mode filtering hides the rest', () => {

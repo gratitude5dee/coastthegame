@@ -72,7 +72,8 @@ export function pointingEvents(samples: DeixisSample[]): DeixisSample[] {
   let cur: DeixisSample | undefined;
   for (const s of samples) {
     if (isPointingEvent(s)) {
-      if (!cur || (s.pinchStrength ?? 0) > (cur.pinchStrength ?? 0) || s.clickEdge) cur = cur && !s.clickEdge && (s.pinchStrength ?? 0) <= (cur.pinchStrength ?? 0) ? cur : s;
+      if (!cur || (s.pinchStrength ?? 0) > (cur.pinchStrength ?? 0) || s.clickEdge)
+        cur = cur && !s.clickEdge && (s.pinchStrength ?? 0) <= (cur.pinchStrength ?? 0) ? cur : s;
       if (s.clickEdge) {
         events.push(s);
         cur = undefined;
@@ -149,13 +150,27 @@ export function resolvePlace(ref: PlaceRef, ctx: ResolveContext): Resolution<[nu
   const rz = fx;
   let p: [number, number, number] = [ap[0], ap[1], ap[2]];
   switch (ref.relative.rel) {
-    case 'left': p = [ap[0] - rx * d, ap[1], ap[2] - rz * d]; break;
-    case 'right': p = [ap[0] + rx * d, ap[1], ap[2] + rz * d]; break;
-    case 'behind': p = [ap[0] + fx * d, ap[1], ap[2] + fz * d]; break;
-    case 'in_front': p = [ap[0] - fx * d, ap[1], ap[2] - fz * d]; break;
-    case 'on_top': p = [ap[0], ap[1] + ctx.scene.radiusOf(anchor.value) * 2, ap[2]]; break;
-    case 'inside': p = [ap[0], ap[1], ap[2]]; break;
-    case 'next_to': p = [ap[0] + rx * d, ap[1], ap[2] + rz * d]; break;
+    case 'left':
+      p = [ap[0] - rx * d, ap[1], ap[2] - rz * d];
+      break;
+    case 'right':
+      p = [ap[0] + rx * d, ap[1], ap[2] + rz * d];
+      break;
+    case 'behind':
+      p = [ap[0] + fx * d, ap[1], ap[2] + fz * d];
+      break;
+    case 'in_front':
+      p = [ap[0] - fx * d, ap[1], ap[2] - fz * d];
+      break;
+    case 'on_top':
+      p = [ap[0], ap[1] + ctx.scene.radiusOf(anchor.value) * 2, ap[2]];
+      break;
+    case 'inside':
+      p = [ap[0], ap[1], ap[2]];
+      break;
+    case 'next_to':
+      p = [ap[0] + rx * d, ap[1], ap[2] + rz * d];
+      break;
   }
   return { value: p, candidates: [p], confidence: Math.min(0.85, anchor.confidence), source: anchor.source };
 }

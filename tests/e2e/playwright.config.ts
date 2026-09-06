@@ -14,7 +14,14 @@ export default defineConfig({
     baseURL: process.env.BASE_URL ?? 'http://localhost:4173',
     viewport: { width: 1280, height: 720 },
     launchOptions: {
-      args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl', '--disable-gpu-sandbox'],
+      args: [
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+        '--ignore-gpu-blocklist',
+        '--enable-webgl',
+        '--disable-gpu-sandbox',
+      ],
     },
   },
   webServer: {

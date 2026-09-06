@@ -1,0 +1,13 @@
+# Used together with .gitignore (package.json "lint": --ignore-path .gitignore --ignore-path .prettierignore).
+skills/
+tests/e2e/__baselines__/
+tests/e2e/__screenshots__/
+apps/web/public/
+pnpm-lock.yaml
+# Product spec: hand-formatted tables and *emphasis*, edited by the owner; Prettier would rewrite ~60% of its lines.
+goal.md
+# TODO(M0): asset factory in progress (AF-1: Marble adapter, runner, cell job specs, docs/cells.md + docs/costs.md
+# ledger). Being written concurrently — drop these lines once that PR lands and run `pnpm format`.
+tools/assets/
+docs/cells.md
+docs/costs.md

@@ -17,11 +17,7 @@
       "handHit": {
         "hand": "right",
         "id": "taco_truck",
-        "point": [
-          0,
-          0,
-          -5
-        ]
+        "point": [0, 0, -5]
       },
       "headHit": "car_blue",
       "pinchStrength": 0.92
@@ -33,21 +29,13 @@
     },
     {
       "t": 1800,
-      "groundPoint": [
-        4,
-        0,
-        -9
-      ],
+      "groundPoint": [4, 0, -9],
       "headHit": "pier_dj",
       "pinchStrength": 0.85,
       "handHit": {
         "hand": "right",
         "id": "ground",
-        "point": [
-          4,
-          0,
-          -9
-        ]
+        "point": [4, 0, -9]
       }
     }
   ],
@@ -70,11 +58,7 @@
       },
       "kind": "place",
       "expect": {
-        "pos": [
-          4,
-          0,
-          -9
-        ],
+        "pos": [4, 0, -9],
         "minConfidence": 0.9
       }
     }

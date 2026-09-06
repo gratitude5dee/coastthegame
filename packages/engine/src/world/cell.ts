@@ -37,6 +37,7 @@ export interface Cell {
   lighting: { preset: TimePreset; envmapFromPano: boolean };
   alignViews: AlignView[]; // 6 views for PHY-5
   budgetOverride?: Partial<Record<'desktop' | 'quest' | 'iphone' | 'visionpro' | 'android' | 'fallback', { lodSplatCount?: number }>>;
+  extra?: Record<string, unknown>; // provider-specific provenance (e.g. `marble: { worldId, worldMarbleUrl, caption, thumbnailUrl }`) — never load-bearing at runtime
 }
 
 export interface Level {

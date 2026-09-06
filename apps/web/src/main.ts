@@ -12,6 +12,8 @@
 import * as THREE from 'three';
 import { SparkRenderer, SplatMesh, SparkControls, SplatFileType } from '@sparkjsdev/spark';
 import { detectPlatform, budgetsFor, RIG_PRESETS, type RigMode } from '@coast/engine';
+import { initPerf } from './perf';
+import { registerServiceWorker } from './pwa';
 
 const params = new URLSearchParams(location.search);
 const isShot = params.has('shot');
@@ -38,6 +40,20 @@ const spark = new SparkRenderer({
 });
 scene.add(spark);
 performance.mark('coast:boot');
+
+// Session id until auth lands (the Worker only requires a non-empty x-coast-session header).
+const sessionId = (() => {
+  try {
+    const k = 'coast:session';
+    const v = sessionStorage.getItem(k) ?? crypto.randomUUID();
+    sessionStorage.setItem(k, v);
+    return v;
+  } catch {
+    return crypto.randomUUID();
+  }
+})();
+const perf = initPerf({ tier: platform.tier, cell: 'valley', sessionId, apiBase: '', splatCount: () => spark.display?.numSplats ?? 0 });
+registerServiceWorker();
 
 // ── Scenes. Cells (goal.md W-2) replace this table with cell.json manifests from R2. ──
 // Spark sample assets are stored Y-down: rotate 180° about X (quaternion (1,0,0,0)) — rotate, never mirror (W-2).
@@ -169,6 +185,7 @@ async function loadScene(id: string) {
   splat = mesh;
   placeCamera(def);
   currentSceneId = id;
+  perf.setCell(id);
 }
 
 void loadScene(currentSceneId);
@@ -218,6 +235,7 @@ renderer.setAnimationLoop((time) => {
   else if (splat) splat.rotation.y = freezeT * 0.5; // deterministic pose for screenshots
 
   renderer.render(scene, camera);
+  perf.tick(dt);
 
   if (frame++ % 10 === 0) {
     const sorted = [...frameTimes].sort((a, b) => a - b);

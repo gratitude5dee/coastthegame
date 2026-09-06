@@ -17,17 +17,8 @@
       "outFormat": "glb",
       "model": "v1.0-20240301"
     },
-    "retarget": [
-      "preset:biped:idle",
-      "preset:biped:walk",
-      "preset:biped:run",
-      "preset:biped:jump",
-      "preset:biped:dance_01"
-    ],
-    "postprocess": [
-      "blender:cleanup-character",
-      "gltf-transform:optimize"
-    ]
+    "retarget": ["preset:biped:idle", "preset:biped:walk", "preset:biped:run", "preset:biped:jump", "preset:biped:dance_01"],
+    "postprocess": ["blender:cleanup-character", "gltf-transform:optimize"]
   },
   "outputs": [
     {

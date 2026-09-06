@@ -1,6 +1,7 @@
 # Reference repos — due diligence (cloned 2026-09-06)
 
 ## Spark (`sparkjsdev/spark`, HEAD 2026-09-03)
+
 - `@sparkjsdev/spark` **2.1.0** (CHANGELOG: 2.1.0 Apr 18 2026; 2.0.0 Apr 14 2026 = LoD/streaming rewrite). **MIT**. Built by World Labs. `peerDependencies: three >= 0.180.0` (dev pins `three ^0.180.0`, `@types/three 0.180.0`).
 - **WebGL2 only. No WebGPU path.** `SparkRenderer` takes a `THREE.WebGLRenderer` (`src/SparkRenderer.ts`). Sort order upload uses a direct `gl.texSubImage2D()` call (three-version risk). Rust→WASM runtime (`rust/spark-rs`, `rust/spark-lib`); `dist/spark.module.js` ≈ 2.7 MB. Platform detection helpers in `src/utils.ts` (`isMobile/isAndroid/isOculus/isQuest2/isIos/isVisionPro`).
 - Core API (`src/index.ts`): `SparkRenderer` (scene orchestrator; LoD/foveation/paging knobs; `renderCubeMap`, `renderEnvMap`), `SplatMesh` (`url|fileBytes|stream|packedSplats`, `lod`, `paged`, `extSplats`, `raycast()`, `pushSplat`, `forEachSplat`, `getBoundingBox`, `skinning`, `edits`, `objectModifiers/worldModifiers`, `onLoad`), `SplatGenerator/SplatModifier/SplatTransformer`, `PackedSplats` (16 B/splat) / `ExtSplats` (32 B), `SplatPager/PagedSplats` (LRU GPU pages, 65536 splats/page; default pool 16M desktop, 6.29M iOS, 8.39M other mobile), `SplatLoader`, `transcodeSpz/writeSpz`, `SplatEdit/SplatEditSdf` (ALL/PLANE/SPHERE/BOX/ELLIPSOID/CYLINDER/CAPSULE/INFINITE_CONE; MULTIPLY/SET_RGB/ADD_RGBA; `displace`, `sdfSmooth/softEdge`), `SplatSkinning` (DQ/LBS, ≤256 bones — only used by `examples/portal` with bespoke SPZ bone weights; no GLB/Mixamo importer), `dyno.*` shader graph (~8k lines), `Readback/RgbaArray`, `SparkXr/XrHands/HandMovement` (`src/SparkXr.ts`, `src/hands.ts`), `SparkControls/FpsMovement/PointerControls` (`src/controls.ts`), `SparkPortals` (experimental), procedural constructors (`constructGrid/Axes/SpherePoints`, `imageSplats`, `textSplats`), stock generators/modifiers (`snow`, `depthColor`, `normalColor`).
@@ -13,18 +14,22 @@
 - Docs: `docs/docs/*.md` (mkdocs → sparkjs.dev). Documented limitations: WebGL2 only; uniform scale; float16 striping unless `ExtSplats`; `covSplats`, LBS skinning, `SparkPortals` experimental.
 
 ## icurtis1 controllers
+
 - **`third-person-controller-splat`** (MIT, 2026-04-23) — TypeScript, `three 0.180.0` pinned, **Spark `^2.0.0`** (`enableLod:true, lodRenderScale:2`, `SplatMesh({url, lod:true})`), Rapier 0.12, `postprocessing` (Bloom/Vignette/BrightnessContrast), Vite 6. Collision: hand-authored `public/collider.glb` (72 KB, README: "export a low-poly mesh from Blender") → `ColliderDesc.trimesh`; KCC = capsule + `enableAutostep(0.4,0.2)` + `enableSnapToGround(0.5)`; camera `OrbitControls` targeting the capsule feet; `AnimationMixer` crossfades on `dog.glb`; keyboard only. README credits World Labs Marble for the world. **Best starting template.**
 - **`gaussian-splat-character-controller`** (MIT) — vanilla three `^0.178`, **Spark `^0.1.10`** (pre-2.0), Rapier 0.12; single `src/main.js` (1298 L); hand-made `collider-v2.glb` (Draco) → trimesh with manual scale/position and a 180° X flip; `PointerLockControls`; keyboard + Gamepad twin-stick; ball shooter; `EffectComposer` + bloom; Spark DoF (`focalDistance/apertureAngle`). Pattern reference only.
 - **`off-axis-sneaker`** (no license) — React + three `^0.182`; legacy `@mediapipe/face_mesh` via CDN (a `tasks-vision` `FaceLandmarker` hook exists but is unused); head pose from landmarks 133/362/1/33/263 with inter-ocular distance as depth; true off-axis frustum via `camera.projectionMatrix.makePerspective(...)` (`src/utils/offAxisCamera.ts`), calibrated by `screenWidthCm/viewingDistanceCm`. Reusable as a "window into a splat world" on desktop webcams — Spark honors `camera.projectionMatrix`.
 - **`fluid-hand-tracking`** (README says MIT, no LICENSE) — React, **no three.js**; webcam + legacy `@mediapipe/hands` (index fingertip / palm); "fluid" is Matter.js 2D circles. Only the MediaPipe pattern transfers (2D screen-space).
 
 ## img2threejs (`img2threejs/img2threejs`, Apache-2.0, v2.0.0)
+
 An **agent skill** (`SKILL.md`) + stdlib-Python gating scripts (`forge/stage1_intake … stage5_rig`): one reference image → a TypeScript factory `createXModel(spec, options)` returning a `THREE.Group` built from primitives/procedural shaders (pivots, sockets, colliders, optional derived rig/`SkinnedMesh`). No mesh files, no GLB export in core, no network calls (host agent supplies vision). Optional integrations: SAM 2.1, Depth-Anything-V2, MediaPipe, TRELLIS reference mesh. Scope: single hero objects/characters (hard-surface strongest); token-heavy; not a world tool.
 
 ## text-to-cad (`earthtojake/text-to-cad`, MIT)
+
 Skills library (`skills/cad`, `cad-viewer`, `dxf`, `urdf`, `gcode`, …) installed via `npx skills add earthtojake/text-to-cad` or Claude/Codex plugin manifests. Backend **build123d on OCP** (`cadgen`), models as Python with `@step/@stl/@threemf/@glb` decorators; CLI `cadgen step|stl|3mf|glb build|snapshot|inspect`. Outputs STEP (primary), STL, 3MF, GLB (Y-up), DXF. Viewer JS in `packages/cadgen-js` (three 0.185.1). Good for mechanical props, not organics.
 
 ## Implications (see goal.md §7)
+
 1. Spark 2.1 gives rendering, LoD, streaming, SDF edits, dyno effects, XR wrapper — all MIT. Pin `three@0.180.0`.
 2. Collision is absent from Spark; both controllers use a low-poly GLB → Rapier trimesh + kinematic capsule. Marble's exported collider GLB closes the authoring gap for generated cells; user scans need a Blender proxy (`tools/assets/blender/collider_proxy.py`).
 3. Never `SplatMesh.raycast()` per frame; Rapier casts for gameplay.

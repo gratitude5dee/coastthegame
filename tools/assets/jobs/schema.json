@@ -12,7 +12,14 @@
     "params": { "type": "object" },
     "outputs": {
       "type": "array",
-      "items": { "type": "object", "required": ["name", "kind"], "properties": { "name": { "type": "string" }, "kind": { "enum": ["png", "jpg", "glb", "spz", "rad", "json", "mp4", "opus", "wav"] } } }
+      "items": {
+        "type": "object",
+        "required": ["name", "kind"],
+        "properties": {
+          "name": { "type": "string" },
+          "kind": { "enum": ["png", "jpg", "glb", "spz", "rad", "json", "mp4", "opus", "wav"] }
+        }
+      }
     },
     "budgetUsd": { "type": "number", "description": "Expected spend; runner refuses to start above DAILY cap remaining" },
     "parallelSafe": { "type": "boolean", "default": true }

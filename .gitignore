@@ -25,5 +25,15 @@ art/renders/
 tools/assets/out/
 docs/perf/*.json
 
+# Marble cell outputs mirrored for the dev server (tools/assets/adapters/marble.ts): binaries stay out, cell.json is tracked
+apps/web/public/cells/**/*.spz
+apps/web/public/cells/**/*.glb
+apps/web/public/cells/**/*.jpg
+apps/web/public/cells/**/*.jpeg
+apps/web/public/cells/**/*.png
+apps/web/public/cells/**/*.webp
+apps/web/public/cells/**/*.part
+!apps/web/public/cells/**/cell.json
+
 # M0 sample splat (4 MB, under the 5 MB rule) so the seed and CI never depend on an external host
 !apps/web/public/samples/*.spz

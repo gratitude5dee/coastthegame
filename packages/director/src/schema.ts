@@ -17,9 +17,7 @@ export type DeicticWord = 'that' | 'this' | 'it';
 export type DeicticPlaceWord = 'there' | 'here';
 
 export type ObjectRef =
-  | { id: string }
-  | { deictic: DeicticWord; ordinal?: number }
-  | { desc: string; near?: { id: string } | { desc: string } };
+  { id: string } | { deictic: DeicticWord; ordinal?: number } | { desc: string; near?: { id: string } | { desc: string } };
 
 export type Relation = 'left' | 'right' | 'behind' | 'in_front' | 'on_top' | 'inside' | 'next_to';
 
@@ -103,7 +101,11 @@ const DEFS = {
         type: 'object',
         properties: {
           deictic: { enum: ['that', 'this', 'it'] },
-          ordinal: { type: 'integer', minimum: 1, description: '1-based position of this word among ALL deictic words (that/this/it/there/here) in the utterance' },
+          ordinal: {
+            type: 'integer',
+            minimum: 1,
+            description: '1-based position of this word among ALL deictic words (that/this/it/there/here) in the utterance',
+          },
         },
         required: ['deictic'],
         additionalProperties: false,
@@ -126,12 +128,21 @@ const DEFS = {
   },
   PlaceRef: {
     anyOf: [
-      { type: 'object', properties: { pos: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 } }, required: ['pos'], additionalProperties: false },
+      {
+        type: 'object',
+        properties: { pos: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 } },
+        required: ['pos'],
+        additionalProperties: false,
+      },
       {
         type: 'object',
         properties: {
           deictic: { enum: ['there', 'here'] },
-          ordinal: { type: 'integer', minimum: 1, description: '1-based position of this word among ALL deictic words (that/this/it/there/here) in the utterance' },
+          ordinal: {
+            type: 'integer',
+            minimum: 1,
+            description: '1-based position of this word among ALL deictic words (that/this/it/there/here) in the utterance',
+          },
         },
         required: ['deictic'],
         additionalProperties: false,
@@ -174,20 +185,59 @@ const ALL_TOOLS = [
   tool('resolve_ref', 'Resolve a possibly-deictic reference to candidate object ids.', { ref: REF }, ['ref']),
   tool('get_shot_state', 'Current camera mode, shot preset, recording state, active mission.', {}),
   tool('list_assets', 'Search spawnable assets by text.', { query: { type: 'string' } }, ['query']),
-  tool('spawn', 'Spawn an asset (by id) or generate one from a prompt at a place.', { asset: { type: 'string' }, prompt: { type: 'string' }, place: PLACE, scale: { type: 'number' }, tags: { type: 'array', items: { type: 'string' } } }, ['place']),
-  tool('move', 'Move an object to a place ("put that there").', { obj: REF, place: PLACE, animate_ms: { type: 'number' } }, ['obj', 'place']),
+  tool(
+    'spawn',
+    'Spawn an asset (by id) or generate one from a prompt at a place.',
+    {
+      asset: { type: 'string' },
+      prompt: { type: 'string' },
+      place: PLACE,
+      scale: { type: 'number' },
+      tags: { type: 'array', items: { type: 'string' } },
+    },
+    ['place'],
+  ),
+  tool('move', 'Move an object to a place ("put that there").', { obj: REF, place: PLACE, animate_ms: { type: 'number' } }, [
+    'obj',
+    'place',
+  ]),
   tool('rotate', 'Rotate an object by yaw or to face another object.', { obj: REF, yaw_deg: { type: 'number' }, face: REF }, ['obj']),
-  tool('scale', 'Scale an object by a factor or to an absolute size in metres.', { obj: REF, factor: { type: 'number' }, size_m: { type: 'number' } }, ['obj']),
+  tool(
+    'scale',
+    'Scale an object by a factor or to an absolute size in metres.',
+    { obj: REF, factor: { type: 'number' }, size_m: { type: 'number' } },
+    ['obj'],
+  ),
   tool('delete', 'Delete an object (requires confirmation below 0.8 confidence).', { obj: REF }, ['obj']),
-  tool('set_material', 'Change colour/material preset of an object.', { obj: REF, color: { type: 'string' }, preset: { type: 'string' }, prompt: { type: 'string' } }, ['obj']),
-  tool('group', 'Group objects so they move together.', { objs: { type: 'array', items: REF, minItems: 2 }, name: { type: 'string' } }, ['objs']),
+  tool(
+    'set_material',
+    'Change colour/material preset of an object.',
+    { obj: REF, color: { type: 'string' }, preset: { type: 'string' }, prompt: { type: 'string' } },
+    ['obj'],
+  ),
+  tool('group', 'Group objects so they move together.', { objs: { type: 'array', items: REF, minItems: 2 }, name: { type: 'string' } }, [
+    'objs',
+  ]),
   tool('ungroup', 'Dissolve a group.', { obj: REF }, ['obj']),
-  tool('set_time', 'Set time-of-day preset or hour.', { preset: { enum: ['golden', 'blue', 'night', 'fog_noon'] }, hour: { type: 'number' } }),
+  tool('set_time', 'Set time-of-day preset or hour.', {
+    preset: { enum: ['golden', 'blue', 'night', 'fog_noon'] },
+    hour: { type: 'number' },
+  }),
   tool('set_weather', 'Set weather.', { kind: { enum: ['fog', 'clear', 'rain'] }, amount: { type: 'number' } }, ['kind']),
-  tool('play_anim', 'Play an animation clip on an actor.', { actor: REF, clip: { type: 'string' }, loop: { type: 'boolean' } }, ['actor', 'clip']),
+  tool('play_anim', 'Play an animation clip on an actor.', { actor: REF, clip: { type: 'string' }, loop: { type: 'boolean' } }, [
+    'actor',
+    'clip',
+  ]),
   tool('possess', 'Give the player control of an actor.', { actor: REF }, ['actor']),
   tool('replay_take', 'Replay a recorded take on an actor.', { take: { type: 'string' }, actor: REF }, ['take', 'actor']),
-  tool('camera', 'Set a shot preset, follow target, or perform a camera move.', { shot: { enum: ['wide', 'medium', 'close', 'low', 'high', 'dutch'] }, follow: REF, move: { enum: ['push_in', 'pull_out', 'orbit', 'crane_up', 'crane_down', 'dolly_left', 'dolly_right'] }, duration_ms: { type: 'number' }, lens_mm: { type: 'number' }, look_at: REF }),
+  tool('camera', 'Set a shot preset, follow target, or perform a camera move.', {
+    shot: { enum: ['wide', 'medium', 'close', 'low', 'high', 'dutch'] },
+    follow: REF,
+    move: { enum: ['push_in', 'pull_out', 'orbit', 'crane_up', 'crane_down', 'dolly_left', 'dolly_right'] },
+    duration_ms: { type: 'number' },
+    lens_mm: { type: 'number' },
+    look_at: REF,
+  }),
   tool('record', 'Start ("action") or stop ("cut") recording the current shot.', { action: { enum: ['start', 'stop'] } }, ['action']),
   tool('mark_beat', 'Drop a labelled marker on the timeline.', { label: { type: 'string' } }, ['label']),
   tool('undo', 'Undo the last n acts.', { n: { type: 'integer', minimum: 1 } }),

@@ -62,11 +62,7 @@
       },
       "kind": "place",
       "expect": {
-        "pos": [
-          1,
-          0,
-          -5
-        ],
+        "pos": [1, 0, -5],
         "minConfidence": 0.8
       }
     }
