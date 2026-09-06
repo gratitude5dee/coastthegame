@@ -158,9 +158,17 @@ describe('Lowrider (PHY-3)', () => {
   it('stays on the block: the ground-grid fence stops a full-throttle run at the edge', () => {
     const physics = new PhysicsWorld(R);
     const cols = 41; // 30 m × 30 m flat grid centred on the origin
-    const grid: GroundGrid = { heights: new Float32Array(cols * cols), cols, rows: cols, minX: -15, minZ: -15, cellSize: 0.75 };
+    const grid: GroundGrid = {
+      heights: new Float32Array(cols * cols),
+      cols,
+      rows: cols,
+      minX: -15,
+      minZ: -15,
+      cellSize: 0.75,
+      coverage: { minX: -15, maxX: 15, minZ: -13.5, maxZ: 15 }, // the scan stops 1.5 m short on −Z: the wall moves in with it
+    };
     physics.addGroundGrid(grid);
-    expect(physics.addFence(grid, 4)).toHaveLength(4);
+    expect(physics.addFence(grid, 4, 0)).toHaveLength(4);
     const car = new Lowrider(physics, { position: new THREE.Vector3(0, 1.2, 0), visuals: false });
     const inp = { ...zeroVehicleInput(), throttle: 1 };
     for (let i = 0; i < 6 * 60; i++) {
@@ -169,7 +177,7 @@ describe('Lowrider (PHY-3)', () => {
       physics.world.step();
     }
     const t = car.body.translation();
-    expect(t.z).toBeGreaterThan(-15 - 0.5); // pinned against the −Z wall, not through it
+    expect(t.z).toBeGreaterThan(-13.5 - 0.5); // pinned against the −Z wall (at the coverage edge), not through it
     expect(t.z).toBeLessThan(-9);
     expect(t.y).toBeGreaterThan(0); // did not fall off
     expect(Math.abs(car.speed)).toBeLessThan(1);

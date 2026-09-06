@@ -27,6 +27,8 @@ export interface GroundGrid {
   minX: number;
   minZ: number;
   cellSize: number;
+  /** World-space rect of the cells that had real samples (the rest is hole-filled); the fence hugs this when present. */
+  coverage?: { minX: number; minZ: number; maxX: number; maxZ: number };
 }
 
 export class PhysicsWorld {
@@ -99,7 +101,7 @@ export class PhysicsWorld {
    * `height` m above the highest ground vertex, so the car and the character stay on the block. Cell graphs replace
    * this with streaming transitions (W-3).
    */
-  addFence(grid: GroundGrid, height = 4): RAPIER_NS.Collider[] {
+  addFence(grid: GroundGrid, height = 4, margin = 1.5): RAPIER_NS.Collider[] {
     let top = -Infinity;
     let bottom = Infinity;
     for (let i = 0; i < grid.heights.length; i++) {
@@ -108,10 +110,13 @@ export class PhysicsWorld {
       if (h < bottom) bottom = h;
     }
     if (!Number.isFinite(top)) top = bottom = 0;
-    const minX = grid.minX;
-    const minZ = grid.minZ;
-    const maxX = grid.minX + (grid.cols - 1) * grid.cellSize;
-    const maxZ = grid.minZ + (grid.rows - 1) * grid.cellSize;
+    const gridMaxX = grid.minX + (grid.cols - 1) * grid.cellSize;
+    const gridMaxZ = grid.minZ + (grid.rows - 1) * grid.cellSize;
+    const c = grid.coverage;
+    const minX = c ? Math.max(grid.minX, c.minX - margin) : grid.minX;
+    const minZ = c ? Math.max(grid.minZ, c.minZ - margin) : grid.minZ;
+    const maxX = c ? Math.min(gridMaxX, c.maxX + margin) : gridMaxX;
+    const maxZ = c ? Math.min(gridMaxZ, c.maxZ + margin) : gridMaxZ;
     const cx = (minX + maxX) / 2;
     const cz = (minZ + maxZ) / 2;
     const hx = (maxX - minX) / 2;

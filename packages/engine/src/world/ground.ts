@@ -69,6 +69,30 @@ export function groundFromSplats(splat: SplatMesh, opts: GroundOptions = {}): Gr
     if (!Number.isNaN(h) && Math.abs(h - median) > maxDeviation) heights[i] = Number.NaN;
   }
 
+  // Coverage: where the scan actually has ground (2nd–98th percentile of sampled cells, so a few stray splats at the
+  // horizon do not stretch it). The fence hugs this; beyond it the grid is hole-filled guesswork.
+  const xs: number[] = [];
+  const zs: number[] = [];
+  for (let z = 0; z < rows; z++) {
+    for (let x = 0; x < cols; x++) {
+      if (Number.isNaN(heights[z * cols + x]!)) continue;
+      xs.push(x);
+      zs.push(z);
+    }
+  }
+  let coverage: GroundGrid['coverage'];
+  if (xs.length >= 8) {
+    xs.sort((a, b) => a - b);
+    zs.sort((a, b) => a - b);
+    const q = (arr: number[], f: number) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * f)))]!;
+    coverage = {
+      minX: minX + q(xs, 0.02) * cellSize,
+      maxX: minX + q(xs, 0.98) * cellSize,
+      minZ: minZ + q(zs, 0.02) * cellSize,
+      maxZ: minZ + q(zs, 0.98) * cellSize,
+    };
+  }
+
   // Fill holes by iterative neighbour averaging (bounded passes), then fall back to the median.
   for (let pass = 0; pass < 64; pass++) {
     let filled = 0;
@@ -115,5 +139,5 @@ export function groundFromSplats(splat: SplatMesh, opts: GroundOptions = {}): Gr
     }
   }
 
-  return { heights: smooth, cols, rows, minX, minZ, cellSize };
+  return { heights: smooth, cols, rows, minX, minZ, cellSize, ...(coverage ? { coverage } : {}) };
 }
