@@ -76,4 +76,6 @@ test('physics smoke: rapier + character controller step without errors', async (
   await page.waitForFunction(() => ((window as unknown as { __coastSteps?: number }).__coastSteps ?? 0) > 60, null, { timeout: 60_000 });
   expect(errors, errors.join('\n')).toHaveLength(0);
   expect(await page.locator('#hud').innerText()).toContain('physics');
+  // Loading choreography (UX-3): the title card wipes away once fetch + detail + physics are in — never a stuck screen.
+  await expect(page.locator('#coast-load')).toBeHidden({ timeout: 60_000 });
 });

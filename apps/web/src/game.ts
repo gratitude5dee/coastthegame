@@ -34,6 +34,7 @@ import { GamepadProvider } from './input/gamepad';
 import { initPerf } from './perf';
 import { StudioSession } from './studio/session';
 import { Metronome } from './audio/metronome';
+import { createLoadingScreen, type LoadingScreen } from './ui/loading';
 
 export interface SceneDef {
   title: string;
@@ -180,6 +181,9 @@ export class Game {
   private last = performance.now();
   private frame = 0;
   private crosshair: HTMLElement;
+  private loadingScreen: LoadingScreen | null = null;
+  private lodReported = false;
+  private readyFrames = 0;
   private hint = '';
   private studio: StudioSession | null = null;
   private photographer: THREE.Group | null = null;
@@ -247,6 +251,24 @@ export class Game {
     this.crosshair.style.cssText =
       'position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:#ffb54a;box-shadow:0 0 0 1px #0008;pointer-events:none;display:none';
     document.body.appendChild(this.crosshair);
+
+    if (this.isShot)
+      document.getElementById('coast-load')?.remove(); // deterministic screenshots: no title card
+    else {
+      const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      this.loadingScreen = createLoadingScreen(
+        document.body,
+        touch
+          ? 'left thumb: move · right thumb: look · ACTION rolls a take · walk up to the photographer'
+          : 'WASD move · drag to look · Tab camera · E grab / get in the lowrider · Enter action · talk to the photographer',
+      );
+      // Reveal on the beat when the grid is running (UX-3 "reveal wipe synced to music").
+      this.loadingScreen.reveal = () => {
+        if (!this.beat.isRunning) return 0;
+        const now = performance.now();
+        return this.beat.timeOf(this.beat.phase(now).beatIndex + 1) - now;
+      };
+    }
 
     this.perf = initPerf({
       tier: platform.tier,
@@ -339,11 +361,19 @@ export class Game {
     window.__coastSteps = 0;
   }
 
-  private beginLoad(title: string) {
+  private beginLoad(title: string, withPhysics: boolean) {
     this.loading = title;
+    this.lodReported = false;
+    this.readyFrames = 0;
     window.__coastReady = false;
     window.__coastLod = false;
+    this.loadingScreen?.begin(title, { stages: withPhysics ? ['fetch', 'lod', 'physics'] : ['fetch', 'lod'] });
   }
+
+  /** Splat download progress → the loading card (total unknown for chunked responses → indeterminate half). */
+  private onFetchProgress = (e: ProgressEvent) => {
+    this.loadingScreen?.progress('fetch', e.lengthComputable && e.total > 0 ? Math.min(0.98, e.loaded / e.total) : 0.5);
+  };
 
   async loadScene(id: string) {
     let def = SCENES[id] ?? LOCAL_BUTTERFLY;
@@ -356,11 +386,12 @@ export class Game {
     this.cellId = null;
     this.currentSceneId = id;
     this.sceneDef = def;
-    this.beginLoad(def.title);
+    this.beginLoad(def.title, !this.isShot && (def.world || this.forcePhysics));
     const mesh = new SplatMesh({
       url: def.url,
       ...(def.fileType ? { fileType: def.fileType } : {}), // never pass fileType: undefined (breaks auto-detect)
       lod: true,
+      onProgress: this.onFetchProgress,
       onLoad: () => this.onWorldLoaded(def),
     });
     mesh.quaternion.set(1, 0, 0, 0);
@@ -399,9 +430,9 @@ export class Game {
       spawn,
     };
     this.sceneDef = def;
-    this.beginLoad(def.title);
+    this.beginLoad(def.title, !this.isShot);
     const e = cell.transform.rotationEuler;
-    const mesh = new SplatMesh({ url: def.url, lod: true, onLoad: () => this.onWorldLoaded(def, cell) });
+    const mesh = new SplatMesh({ url: def.url, lod: true, onProgress: this.onFetchProgress, onLoad: () => this.onWorldLoaded(def, cell) });
     mesh.rotation.set(THREE.MathUtils.degToRad(e[0]), THREE.MathUtils.degToRad(e[1]), THREE.MathUtils.degToRad(e[2]));
     mesh.position.set(...def.position);
     mesh.scale.setScalar(def.scale);
@@ -425,6 +456,7 @@ export class Game {
     this.loading = '';
     if (!performance.getEntriesByName('coast:interactive').length) performance.mark('coast:interactive'); // QB-3
     window.__coastReady = true;
+    this.loadingScreen?.progress('fetch', 1);
     if (!this.isShot && (def.world || this.forcePhysics)) void this.initPhysics(def, cell);
   }
 
@@ -434,6 +466,7 @@ export class Game {
     const gen = ++this.physicsGen;
     const R = await loadRapier();
     if (gen !== this.physicsGen || !this.splat) return; // scene changed while loading
+    this.loadingScreen?.progress('physics', 0.35);
     const physics = new PhysicsWorld(R);
     this.physics = physics;
 
@@ -474,6 +507,7 @@ export class Game {
       this.scene.add(this.groundMesh);
     }
 
+    this.loadingScreen?.progress('physics', 0.7);
     const spawnY = this.ground ? groundHeightAt(this.ground, spawnXZ.x, spawnXZ.z) : spawnXZ.y;
     const feet = new THREE.Vector3(spawnXZ.x, spawnY + 0.3, spawnXZ.z);
     this.character = new CharacterController(physics, { start: feet, yaw: this.rig.yaw });
@@ -522,6 +556,7 @@ export class Game {
 
     this.physicsReady = true;
     window.__coastPhysics = true;
+    this.loadingScreen?.progress('physics', 1);
     this.updateHint();
   }
 
@@ -677,6 +712,15 @@ export class Game {
     if (this.frameTimes.length > 240) this.frameTimes.shift();
     window.__coastFrame = this.frame;
     window.__coastLod = !!(this.splat as unknown as { packedSplats?: { lodSplats?: unknown } } | null)?.packedSplats?.lodSplats;
+    if (!this.lodReported && window.__coastReady) {
+      // Detail stage: the LoD tree is built — or the world has clearly been on screen for a while (no LoD on tiny scenes).
+      if (window.__coastLod) this.readyFrames = 90;
+      else if ((this.spark.display?.numSplats ?? 0) > 0) this.readyFrames++;
+      if (this.readyFrames >= 90) {
+        this.lodReported = true;
+        this.loadingScreen?.progress('lod', 1);
+      }
+    }
 
     if (this.isShot) {
       if (this.splat) this.splat.rotation.y = this.freezeT * 0.5; // deterministic pose for screenshots

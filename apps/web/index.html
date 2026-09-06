@@ -18,6 +18,31 @@
   <body>
     <div id="hud">loading…</div>
     <div id="enter"></div>
+    <!-- Static title card shown while the bundle loads; src/ui/loading.ts adopts it and drives the real progress (UX-3). -->
+    <style id="coast-loading-css">
+      #coast-load{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(120% 90% at 50% 110%,#1a1424 0%,#0b0a10 60%);color:#f2ecdc;font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;pointer-events:none;user-select:none;-webkit-user-select:none;transition:opacity .35s ease}
+      #coast-load[hidden]{display:none}
+      #coast-load[data-stalled="1"]{opacity:.55}
+      #coast-load[data-wipe="1"]{animation:coast-wipe 650ms cubic-bezier(.7,0,.2,1) forwards}
+      .cl-mark{font-size:44px;font-weight:800;letter-spacing:.22em;color:#ffb54a;text-shadow:0 0 28px rgba(255,181,74,.35)}
+      .cl-mark small{display:block;margin-top:2px;font-size:11px;font-weight:600;letter-spacing:.34em;color:rgba(242,236,220,.55)}
+      .cl-title{font-variant:small-caps;letter-spacing:.14em;font-size:14px;color:rgba(242,236,220,.85);min-height:1.4em}
+      .cl-bar{position:relative;width:min(320px,70vw);height:3px;border-radius:2px;background:rgba(242,236,220,.14);overflow:hidden}
+      .cl-fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:2px;background:#ffb54a;transition:width .25s ease}
+      .cl-bar[data-indeterminate="1"] .cl-fill{width:30%;animation:coast-sweep 1.2s ease-in-out infinite}
+      .cl-note{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:rgba(242,236,220,.55);min-height:1.4em}
+      .cl-help{position:absolute;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom,0px));text-align:center;font-size:11px;color:rgba(242,236,220,.5);letter-spacing:.06em;padding:0 16px}
+      @keyframes coast-wipe{to{clip-path:inset(0 0 100% 0)}}
+      @keyframes coast-sweep{0%{left:-30%}100%{left:100%}}
+      @media (prefers-reduced-motion:reduce){#coast-load[data-wipe="1"]{animation:none;opacity:0}.cl-bar[data-indeterminate="1"] .cl-fill{animation:none;width:100%;opacity:.4}}
+    </style>
+    <div id="coast-load" role="status" aria-live="polite">
+      <div class="cl-mark">$COAST<small>THE GAME</small></div>
+      <div class="cl-title"></div>
+      <div class="cl-bar" data-indeterminate="1"><div class="cl-fill"></div></div>
+      <div class="cl-note">warming up…</div>
+      <div class="cl-help"></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

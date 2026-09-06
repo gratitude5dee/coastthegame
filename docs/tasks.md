@@ -14,7 +14,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 - [ ] `scripts/setup.sh` validated in a fresh Codex environment (≤10 min)
 - [x] ESLint/Prettier root config (`eslint.config.js`, `.prettierrc`; `pnpm lint` = eslint + prettier --check)
 - [x] Code-split Spark/three (QB-3): `three` 477 kB / 120 kB gzip, `spark` 4.93 MB / 1.75 MB gzip, app chunk 7.5 kB (was one 5.4 MB / 1.9 MB gzip chunk)
-- [ ] Loading choreography stub (UX-3); Rapier + MediaPipe on demand via dynamic `import()` (QB-3)
+- [x] Loading choreography (UX-3): static title card in `index.html` adopted by `apps/web/src/ui/loading.ts` — weighted stages fetch (Spark `onProgress`) → detail (LoD) → physics, reveal wipe timed to the next beat, 30 s stall fallback; pano-skybox stage lands with M2. Rapier on demand via dynamic `import()` (QB-3); MediaPipe pending
 
 ## M1 — Art direction pack (AD-*)
 
