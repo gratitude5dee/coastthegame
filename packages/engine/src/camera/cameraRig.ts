@@ -15,6 +15,8 @@ export interface RigTarget {
   yaw: number;
   /** Eye height above the feet (m). */
   eyeHeight: number;
+  /** Follow-mode multipliers for a bigger subject (the lowrider): distance and height (default 1). */
+  followScale?: { distance: number; height: number };
 }
 
 export interface LookInput {
@@ -121,11 +123,12 @@ export class CameraRig {
     }
 
     // Follow modes: desired position on an orbit around the target, then damped.
-    const dist = this.params.distance * this.zoom;
+    const fs = target.followScale;
+    const dist = this.params.distance * this.zoom * (fs?.distance ?? 1);
     const pitchLift = Math.sin(this.pitch) * dist;
     this.tmpDesired
       .copy(target.feet)
-      .addScaledVector(UP, this.params.height + pitchLift)
+      .addScaledVector(UP, this.params.height * (fs?.height ?? 1) + pitchLift)
       .addScaledVector(forward, -dist * Math.cos(this.pitch))
       .addScaledVector(right, this.params.shoulder);
     if (!this.initialised) {

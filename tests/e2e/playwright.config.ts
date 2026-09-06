@@ -7,6 +7,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.spec.ts',
+  workers: 1,
   snapshotPathTemplate: '{testDir}/__baselines__/{arg}{ext}',
   timeout: 120_000,
   retries: 0,

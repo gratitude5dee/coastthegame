@@ -1,7 +1,8 @@
 /**
- * Game orchestrator (M3 actor mode on sample worlds — goal.md ACT-1, PHY-1/2, CAM-1/2, INP-1/2, DIR-3 fallback).
- * Owns the scene, Spark, the cell/scene loader, physics, the possessed character, props, the camera rig and the HUD.
- * Input arrives only as FrameInput from providers (PLT-2). Simulation is fixed 60 Hz with render interpolation (STU-1).
+ * Game orchestrator (M3 actor mode on sample worlds — goal.md ACT-1, PHY-1/2/3, CAM-1/2, INP-1/2, DIR-3 fallback).
+ * Owns the scene, Spark, the cell/scene loader, physics, the possessed character, the lowrider, props, the beat clock,
+ * the camera rig and the HUD. Input arrives only as FrameInput from providers (PLT-2). Simulation is fixed 60 Hz with
+ * render interpolation (STU-1).
  */
 import * as THREE from 'three';
 import { SparkRenderer, SplatMesh, SplatFileType } from '@sparkjsdev/spark';
@@ -9,23 +10,30 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   CameraRig,
   CharacterController,
+  Lowrider,
   PhysicsWorld,
   PropSystem,
   budgetsFor,
   groundFromSplats,
   groundHeightAt,
+  liftFromAxes,
   loadRapier,
+  zeroVehicleInput,
   type Cell,
   type GroundGrid,
+  type HopPattern,
   type PlatformInfo,
   type RigMode,
+  type VehicleInput,
 } from '@coast/engine';
+import { BeatClock, type MeterSample } from '@coast/studio';
 import { newFrameInput, resetFrameInput, type FrameInput, type InputProvider } from './input/intents';
 import { KeyboardMouseProvider } from './input/keyboardMouse';
 import { TouchProvider } from './input/touch';
 import { GamepadProvider } from './input/gamepad';
 import { initPerf } from './perf';
 import { StudioSession } from './studio/session';
+import { Metronome } from './audio/metronome';
 
 export interface SceneDef {
   title: string;
@@ -91,6 +99,15 @@ type TimePreset = keyof typeof TIME_PRESETS;
 const TIME_ORDER: TimePreset[] = ['noon', 'golden', 'blue', 'night'];
 const RIG_ORDER: RigMode[] = ['actor', 'director', 'producer'];
 const EYE_HEIGHT = 1.62;
+/** Lowrider camera target: "feet" sit this far below the chassis centre; the driver's eye this far above them. */
+const CAR_FEET_DROP = 0.6;
+const CAR_EYE_HEIGHT = 1.55;
+const CAR_FOLLOW = { distance: 2.1, height: 1.0 };
+/** Beat-driven hydraulics pattern per beat in the bar (PHY-3 "driven by the track's beat grid"). */
+const AUTO_HOP_PATTERN: HopPattern[] = ['front', 'back', 'left', 'right'];
+const ENTER_DISTANCE = 3.4;
+const LEAVE_DISTANCE = 4.5;
+const VERDICT_GRACE_MS = 6000;
 
 export interface GameOptions {
   platform: PlatformInfo;
@@ -106,6 +123,7 @@ declare global {
     __coastFrame?: number;
     __coastSteps?: number;
     __coastPhysics?: boolean;
+    __coastVehicle?: { driving: boolean; speed: number; pos: [number, number, number]; hops: number; wheels: number; autoHop: boolean };
   }
 }
 
@@ -122,6 +140,7 @@ export class Game {
   private readonly perf;
   private providers: InputProvider[] = [];
   private kbm: KeyboardMouseProvider;
+  private touch: TouchProvider;
   private input: FrameInput = newFrameInput();
 
   private splat: SplatMesh | null = null;
@@ -135,6 +154,16 @@ export class Game {
   private physics: PhysicsWorld | null = null;
   private character: CharacterController | null = null;
   private props: PropSystem | null = null;
+  private vehicle: Lowrider | null = null;
+  private vehicleSpawn: { pos: THREE.Vector3; yaw: number } | null = null;
+  private driving = false;
+  private readonly vehicleInput: VehicleInput = zeroVehicleInput();
+  private lastCarYaw = 0;
+  private readonly beat = new BeatClock();
+  private readonly metronome = new Metronome(this.beat);
+  private autoHop = false;
+  private pendingBeat: { event: NonNullable<MeterSample['beatEvent']>; phaseMs: number } | null = null;
+  private verdictAt = 0;
   private ground: GroundGrid | null = null;
   private groundMesh: THREE.Mesh | null = null; // invisible raycast target + optional debug wireframe
   private colliderMeshes: THREE.Object3D[] = [];
@@ -210,7 +239,8 @@ export class Game {
     this.camera.updateProjectionMatrix();
 
     this.kbm = new KeyboardMouseProvider(this.renderer.domElement);
-    this.providers = [this.kbm, new TouchProvider(this.renderer.domElement), new GamepadProvider()];
+    this.touch = new TouchProvider(this.renderer.domElement);
+    this.providers = [this.kbm, this.touch, new GamepadProvider()];
     this.kbm.setPointerLockDesired(this.rig.mode === 'actor');
 
     this.crosshair = document.createElement('div');
@@ -271,6 +301,15 @@ export class Game {
     this.physicsGen++;
     this.physicsReady = false;
     this.character = null;
+    if (this.vehicle) {
+      this.vehicle.dispose();
+      this.vehicle = null;
+    }
+    this.vehicleSpawn = null;
+    this.setDriving(false);
+    this.autoHop = false;
+    this.metronome.disable();
+    this.beat.stop();
     if (this.props) {
       for (const id of [...this.props.props.keys()]) this.props.remove(id);
       this.scene.remove(this.props.group, this.props.ghost);
@@ -467,11 +506,73 @@ export class Game {
       at(4.5, -0.3, this.groundDelta(feet, f, 4.5, right, -0.3)),
     );
 
+    // The lowrider idles ahead and to the left, facing the same way (PHY-3). It drops onto its suspension.
+    const carPos = feet.clone().addScaledVector(f, 5).addScaledVector(right, -3.5);
+    carPos.y = (this.ground ? groundHeightAt(this.ground, carPos.x, carPos.z) : feet.y) + 1.0;
+    this.vehicle = new Lowrider(physics, { position: carPos, yaw: this.rig.yaw });
+    this.vehicleSpawn = { pos: carPos.clone(), yaw: this.rig.yaw };
+    this.scene.add(this.vehicle.group);
+
     this.setupStudio(feet, f, right);
+
+    // The beat grid starts with the world (the track player lands with AUD-2); `?beat=1` = hop on the beat from the start.
+    this.beat.start(performance.now());
+    if (this.opts.params.get('beat') === '1') this.autoHop = true;
+    if (this.opts.params.get('vehicle') === '1') this.enterVehicle();
 
     this.physicsReady = true;
     window.__coastPhysics = true;
     this.updateHint();
+  }
+
+  // ── Lowrider (PHY-3) ─────────────────────────────────────────────────────────────────────────────────────────
+
+  private setDriving(v: boolean) {
+    if (v === this.driving) return;
+    this.driving = v;
+    this.touch.setDriving(v);
+  }
+
+  private enterVehicle() {
+    const car = this.vehicle;
+    const ch = this.character;
+    if (!car || !ch || this.driving) return;
+    this.props?.release(null);
+    this.props?.select(null);
+    ch.setActive(false);
+    this.playerMesh.visible = false;
+    this.lastCarYaw = car.yaw;
+    this.setDriving(true);
+    performance.mark('coast:vehicle-enter');
+    this.updateHint();
+  }
+
+  private exitVehicle() {
+    const car = this.vehicle;
+    const ch = this.character;
+    if (!car || !ch || !this.driving) return;
+    const out = car.exitPoint(new THREE.Vector3());
+    if (this.ground) out.y = groundHeightAt(this.ground, out.x, out.z) + 0.3;
+    ch.setActive(true);
+    ch.teleport(out);
+    ch.yaw = car.yaw;
+    this.setDriving(false);
+    this.updateHint();
+  }
+
+  /** Which corners a manual hop lifts: the held switch decides (front by default, Shift = all four). */
+  private hopPattern(): HopPattern {
+    const i = this.input;
+    if (i.sprint) return 'all';
+    if (i.hydro.y < -0.5) return 'back';
+    if (i.hydro.x < -0.5) return 'left';
+    if (i.hydro.x > 0.5) return 'right';
+    return 'front';
+  }
+
+  /** Feet-level target for the camera rig while driving. */
+  private carFeet(out: THREE.Vector3): THREE.Vector3 {
+    return this.vehicle!.position(out).sub(this.tmpV2.set(0, CAR_FEET_DROP, 0));
   }
 
   /** The Photographer (tutor NPC placeholder), the billboard, and the studio session (goal.md §3.1 steps 2, 5). */
@@ -526,16 +627,19 @@ export class Game {
     this.scene.add(bb);
     this.billboard = bb;
 
+    const missionParam = Number(this.opts.params.get('mission') ?? '0');
     const studio = new StudioSession(
       document.body,
       this.scene,
       this.playerMesh,
       this.renderer.domElement,
       this.cellId ?? this.currentSceneId,
+      undefined,
+      missionParam > 0 ? missionParam - 1 : 0,
     );
     studio.onClip = (url) => this.showClip(url);
     this.studio = studio;
-    if (this.opts.params.get('mission') === '1') studio.brief();
+    if (missionParam > 0) studio.brief(); // QA: `?mission=n` auto-briefs mission n
   }
 
   private showClip(url: string | null) {
@@ -582,9 +686,12 @@ export class Game {
       this.simulate(dt);
       this.updateCamera(dt);
       this.updatePointer();
+      this.metronome.tick(performance.now());
+      this.pendingBeat = null; // consumed by this frame's meter sample
     }
 
     this.renderer.render(this.scene, this.camera);
+    this.studio?.frameRendered();
     this.perf.tick(dtMs);
     if (this.frame++ % 10 === 0) this.renderHud();
   }
@@ -616,18 +723,36 @@ export class Game {
       for (const m of this.colliderMeshes) m.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).visible = this.debug) : null));
     }
     if (i.resetEdge) {
+      this.exitVehicle();
       this.placeCamera(this.sceneDef);
       if (this.character) {
         const s = this.sceneDef.spawn ?? [0, 0, 0];
         const y = this.ground ? groundHeightAt(this.ground, s[0], s[2]) : s[1];
         this.character.teleport(new THREE.Vector3(s[0], y + 0.3, s[2]));
       }
+      if (this.vehicle && this.vehicleSpawn) this.vehicle.teleport(this.vehicleSpawn.pos, this.vehicleSpawn.yaw);
     }
     if (i.undo) this.props?.undo();
     if (i.cancel) this.props?.select(null);
+    if (i.beatToggle) {
+      this.autoHop = !this.autoHop;
+      if (this.autoHop) this.metronome.enable(performance.now());
+      else this.metronome.disable();
+      this.updateHint();
+    }
 
     const props = this.props;
     if (!props || !this.character) return;
+
+    // Lowrider: E gets in / out; Space hops (a manual hop is a judged beat event, MIS-2 beatSync).
+    const wasDriving = this.driving;
+    if (wasDriving) {
+      if (i.interact) this.exitVehicle();
+      else if (i.jump && this.vehicle) {
+        this.vehicleInput.hop = this.hopPattern();
+        this.pendingBeat = { event: 'hop', phaseMs: this.beat.phase(performance.now()).msToNearest };
+      }
+    }
 
     // Studio: roll / cut / playback (goal.md §3.1 steps 4–5)
     if (this.studio) {
@@ -639,14 +764,17 @@ export class Game {
       if (i.playback) this.studio.togglePlayback(performance.now());
     }
 
-    // Grab / throw (PHY-2)
-    if (i.interact) {
+    // Grab / throw (PHY-2) — or get in the lowrider when it is the closer thing (never on the edge that just got out).
+    if (i.interact && !wasDriving) {
       if (props.grabbed) {
         this.studio?.edit(performance.now(), { kind: 'propRelease', propId: props.grabbed.spec.id });
         props.release(null);
       } else {
         const near = this.nearestProp(2.6);
-        if (near) {
+        const carDist = this.vehicleDistance();
+        if (carDist < ENTER_DISTANCE && (!near || carDist < near.mesh.position.distanceTo(this.character.feet(this.tmpV)))) {
+          this.enterVehicle();
+        } else if (near) {
           props.grab(near);
           this.studio?.edit(performance.now(), { kind: 'propGrab', propId: near.spec.id });
         }
@@ -693,30 +821,75 @@ export class Game {
     const ch = this.character;
     if (!physics || !ch || !this.physicsReady) return;
     const i = this.input;
+    const driving = this.driving && !!this.vehicle;
     // Local move → world move relative to the camera yaw.
     const yaw = this.rig.yaw;
     const mx = THREE.MathUtils.clamp(i.move.x, -1, 1);
     const my = THREE.MathUtils.clamp(i.move.y, -1, 1);
     this.tmpMove.set(mx * Math.cos(yaw) - my * Math.sin(yaw), -mx * Math.sin(yaw) - my * Math.cos(yaw));
-    const charInput = { move: this.tmpMove, jump: i.jump, sprint: i.sprint };
+    const charInput = { move: this.tmpMove, jump: i.jump && !driving, sprint: i.sprint };
+
+    // Lowrider input: the stick drives when you are in it; the switchbox works from outside too (it is a show car).
+    const vi = this.vehicleInput;
+    vi.throttle = driving ? my : 0;
+    vi.steer = driving ? mx : 0;
+    vi.brake = driving && i.sprint;
+    vi.lift = liftFromAxes(THREE.MathUtils.clamp(i.hydro.x, -1, 1), THREE.MathUtils.clamp(i.hydro.y, -1, 1));
+    if (this.autoHop) {
+      const now = performance.now();
+      for (const b of this.beat.crossed(now)) {
+        const bpb = this.beat.grid.beatsPerBar;
+        vi.hop = AUTO_HOP_PATTERN[(((b % bpb) + bpb) % bpb) % AUTO_HOP_PATTERN.length] ?? 'front';
+      }
+    }
+
     physics.step(dt, (fixedDt) => {
       this.props?.beforeStep();
-      ch.step(fixedDt, charInput);
-      charInput.jump = false; // edge consumed by the first sub-step
+      this.vehicle?.beforeStep();
+      this.vehicle?.step(fixedDt, vi);
+      vi.hop = null; // edge consumed by the first sub-step
+      if (!driving) ch.step(fixedDt, charInput);
+      charInput.jump = false;
       if (this.props?.grabbed) this.props.updateGrabbed(this.holdPoint());
     });
     window.__coastSteps = physics.stepCount;
-    if (this.rig.mode === 'actor') ch.yaw = this.rig.yaw;
+    if (this.rig.mode === 'actor' && !driving) ch.yaw = this.rig.yaw;
     this.props?.sync(physics.alpha);
+    this.vehicle?.sync(physics.alpha);
+    if (this.vehicle) {
+      const p = this.vehicle.position(this.tmpV);
+      window.__coastVehicle = {
+        driving,
+        speed: this.vehicle.speed,
+        pos: [p.x, p.y, p.z],
+        hops: this.vehicle.hops,
+        wheels: this.vehicle.wheelsOnGround,
+        autoHop: this.autoHop,
+      };
+    }
     // Fell through the world? Respawn on the ground.
-    if (ch.feet(this.tmpV).y < -40) i.resetEdge = true;
+    if ((driving ? this.vehicle!.position(this.tmpV) : ch.feet(this.tmpV)).y < -40) i.resetEdge = true;
   }
 
   private updateCamera(dt: number) {
     const ch = this.character;
-    const feet = ch ? ch.feet(this.tmpV) : this.tmpV.set(...(this.sceneDef.spawn ?? [0, 0, 0]));
+    const car = this.driving ? this.vehicle : null;
+    const feet = car ? this.carFeet(this.tmpV) : ch ? ch.feet(this.tmpV) : this.tmpV.set(...(this.sceneDef.spawn ?? [0, 0, 0]));
     const look = { yaw: this.input.look.x, pitch: this.input.look.y, zoom: this.input.zoom };
-    if (ch) {
+    if (car && ch) {
+      // Driving: the rig follows the car; in first person the look turns with the car (free look on top).
+      const carYaw = car.yaw;
+      const dYaw = Math.atan2(Math.sin(carYaw - this.lastCarYaw), Math.cos(carYaw - this.lastCarYaw));
+      this.lastCarYaw = carYaw;
+      if (this.rig.mode === 'actor') this.rig.yaw += dYaw;
+      this.rig.update(dt, this.camera, { feet, yaw: carYaw, eyeHeight: CAR_EYE_HEIGHT, followScale: CAR_FOLLOW }, look);
+      if (this.ground && this.rig.mode !== 'actor') {
+        const minY = groundHeightAt(this.ground, this.camera.position.x, this.camera.position.z) + 0.25;
+        if (this.camera.position.y < minY) this.camera.position.y = minY;
+      }
+      this.playerMesh.visible = false;
+      this.updateStudio(feet);
+    } else if (ch) {
       this.rig.update(dt, this.camera, { feet, yaw: ch.yaw, eyeHeight: EYE_HEIGHT }, look);
       // Keep follow cameras above the terrain (low-angle shots may dip, never clip through the ground).
       if (this.ground && this.rig.mode !== 'actor') {
@@ -783,6 +956,12 @@ export class Game {
     return best;
   }
 
+  /** Distance from the player's feet to the lowrider's chassis (∞ without one). */
+  private vehicleDistance(): number {
+    if (!this.vehicle || !this.character) return Infinity;
+    return this.vehicle.position(this.tmpV2).distanceTo(this.character.feet(this.tmpV));
+  }
+
   private holdPoint(): THREE.Vector3 {
     const fwd = this.camera.getWorldDirection(new THREE.Vector3());
     if (this.rig.mode === 'actor') return this.camera.position.clone().addScaledVector(fwd, 1.5);
@@ -795,40 +974,56 @@ export class Game {
   private updateStudio(feet: THREE.Vector3) {
     const studio = this.studio;
     if (!studio) return;
-    if (studio.state === 'idle' && this.photographer && feet.distanceTo(this.photographer.position) < 2.6) {
+    const npcDist = this.photographer ? feet.distanceTo(this.photographer.position) : Infinity;
+    if (studio.state === 'idle' && npcDist < 2.6) {
       studio.brief();
       this.updateHint();
-    }
+    } else if (studio.state === 'verdict') {
+      // Walking off after reading the verdict banks the stars and queues the next mission (talk to the tutor again).
+      if (this.verdictAt === 0) this.verdictAt = performance.now();
+      else if (npcDist > LEAVE_DISTANCE && performance.now() - this.verdictAt > VERDICT_GRACE_MS) {
+        studio.leave();
+        this.verdictAt = 0;
+        this.updateHint();
+      }
+    } else this.verdictAt = 0;
     if (this.photographer) this.photographer.lookAt(feet.x, this.photographer.position.y, feet.z);
     studio.tick(this.frameContext());
   }
 
   private frameContext() {
     const ch = this.character!;
-    const feet = ch.feet(new THREE.Vector3());
+    const car = this.driving ? this.vehicle : null;
+    const feet = car ? this.carFeet(new THREE.Vector3()).clone() : ch.feet(new THREE.Vector3());
     const camH = this.ground
       ? this.camera.position.y - groundHeightAt(this.ground, this.camera.position.x, this.camera.position.z)
       : this.camera.position.y - feet.y;
+    const subject = this.studio?.subjectId ?? 'crate_1';
     return {
       nowMs: performance.now(),
       feet,
-      yaw: ch.yaw,
-      speed: ch.speed,
-      grounded: ch.grounded,
+      yaw: car ? car.yaw : ch.yaw,
+      speed: car ? Math.abs(car.speed) : ch.speed,
+      grounded: car ? car.wheelsOnGround >= 2 : ch.grounded,
       camera: this.camera,
       cameraHeightM: camH,
-      subjectInFrame: this.subjectInFrame('crate_1'),
+      subjectInFrame: this.subjectInFrame(subject),
       timePreset: this.timePreset,
       cell: this.cellId ?? this.currentSceneId,
+      ...(this.pendingBeat ? { beatEvent: this.pendingBeat.event, beatPhaseMs: this.pendingBeat.phaseMs } : {}),
     };
   }
 
-  /** Frustum test of a prop's bounding sphere (subjectInFrame constraint). */
-  private subjectInFrame(propId: string): boolean {
-    const p = this.props?.props.get(propId);
-    if (!p) return false;
+  /** Frustum test of the subject's bounding sphere (subjectInFrame constraint): a prop id or 'lowrider'. */
+  private subjectInFrame(id: string): boolean {
     this.frustumMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.frustumMatrix);
+    if (id === 'lowrider') {
+      if (!this.vehicle) return false;
+      return this.frustum.intersectsSphere(this.vehicle.boundingSphere(this.subjectSphere));
+    }
+    const p = this.props?.props.get(id);
+    if (!p) return false;
     if (!p.mesh.geometry.boundingSphere) p.mesh.geometry.computeBoundingSphere();
     this.subjectSphere.copy(p.mesh.geometry.boundingSphere!).applyMatrix4(p.mesh.matrixWorld);
     return this.frustum.intersectsSphere(this.subjectSphere);
@@ -836,16 +1031,27 @@ export class Game {
 
   private updateHint() {
     const p = this.props;
+    const beat = this.autoHop ? ' · H beat off' : ' · H hop on the beat';
     if (!this.physicsReady) this.hint = 'loading physics…';
+    else if (this.driving)
+      this.hint =
+        (this.studio?.state === 'recording' ? '● recording — Enter to cut · ' : '') +
+        'WASD drive · Space hop · Shift brake (Shift+Space = all four) · I/K front/back · J/L sides · E get out' +
+        beat;
     else if (p?.grabbed) this.hint = 'E drop · F / click throw';
     else if (p?.selected) this.hint = 'click the ground = put it there · Esc cancel · Z undo';
     else if (this.studio?.state === 'recording') this.hint = '● recording — Enter to cut';
     else if (this.studio?.state === 'briefed')
-      this.hint = 'Enter = action · get low (drag the camera down) · keep the crate in frame · T for golden hour';
+      this.hint =
+        this.studio.mission.id === 'm02-hop-on-the-one'
+          ? 'Enter = action · get in the lowrider (E) · hop (Space) on the beat · keep the car in frame' + beat
+          : 'Enter = action · get low (drag the camera down) · keep the crate in frame · T for golden hour';
+    else if (this.vehicleDistance() < ENTER_DISTANCE) this.hint = 'E = get in the lowrider' + beat;
     else if (this.rig.mode === 'actor')
-      this.hint = 'click to lock the mouse · WASD · Space jump · Shift sprint · E grab · click a prop then the ground = put that there';
+      this.hint =
+        'click to lock the mouse · WASD · Space jump · Shift sprint · E grab / get in the car · click a prop then the ground = put that there';
     else if (this.rig.mode === 'director')
-      this.hint = 'drag to orbit · wheel zoom · WASD move · click a prop then the ground = put that there · E grab';
+      this.hint = 'drag to orbit · wheel zoom · WASD move · E grab / get in the car · click a prop then the ground = put that there';
     else this.hint = 'overhead: drag to orbit · wheel zoom · click a prop, then click where it goes';
   }
 
@@ -855,12 +1061,16 @@ export class Game {
     const fps = this.frameTimes.length ? 1000 / (this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length) : 0;
     const title = this.usingFallback ? 'offline → local butterfly' : this.sceneDef.title;
     const label = this.cellId ? `cell ${this.cellId}` : title;
-    if (!this.hint) this.updateHint();
+    if (!this.hint || (!this.driving && this.studio?.state !== 'recording')) this.updateHint(); // proximity hints change as you walk
     this.opts.hud.innerHTML =
       `<b>$COAST</b> M3 playground · <b>${label}</b>${this.loading ? ' · loading…' : ''}<br>` +
       `tier <b>${this.opts.platform.tier}</b> · xr:${this.opts.platform.webxr} · ${fps.toFixed(0)} fps · p95 ${p95.toFixed(1)} ms (target ${this.budgets.frameBudgetMs}) · ` +
       `splats ${(this.spark.display?.numSplats ?? 0).toLocaleString()} / ${this.budgets.lodSplatCount.toLocaleString()}` +
-      (this.physicsReady ? ` · physics ${this.character?.grounded ? 'grounded' : 'air'}` : '') +
+      (this.physicsReady && !this.driving ? ` · physics ${this.character?.grounded ? 'grounded' : 'air'}` : '') +
+      (this.driving && this.vehicle
+        ? ` · lowrider ${Math.round(Math.abs(this.vehicle.speed) * 3.6)} km/h · ${this.vehicle.wheelsOnGround}/4 wheels down`
+        : '') +
+      (this.autoHop ? ` · beat ● ${this.beat.phase(performance.now()).bar + 1}.${this.beat.phase(performance.now()).beatInBar + 1}` : '') +
       `<br>mode <b>${this.rig.mode}</b> (Tab) · time <b>${this.timePreset}</b> (T) · scenes 1–4 · C collider · R reset<br><span style="opacity:.8">${this.hint}</span>`;
   }
 }

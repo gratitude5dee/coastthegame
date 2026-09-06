@@ -529,3 +529,35 @@ export const MISSION_LOW_AND_SLOW: Mission = {
   takesMax: 3,
   authoredBy: 'human',
 };
+
+/**
+ * Mission 2 (goal.md §3.1 step 3, PHY-3): hit the hydraulic switch on the beat with the lowrider in frame. Only *manual*
+ * hops count as `beatEvent: 'hop'` — the beat-driven auto-hop (H) is the car dancing by itself, not the player's timing.
+ */
+export const MISSION_HOP_ON_THE_ONE: Mission = {
+  id: 'm02-hop-on-the-one',
+  title: 'Hop on the one',
+  trackId: 'coast-demo',
+  barRange: [17, 20],
+  section: 'Hook',
+  look: '35mm-dusk',
+  cell: 'valley',
+  constraints: [
+    { kind: 'subjectInFrame', subject: 'lowrider', minShare: 0.7 },
+    { kind: 'beatSync', event: 'hop', window_ms: 150 },
+    { kind: 'cameraHeight', max_m: 1.2 },
+    { kind: 'duration_s', target: 8, tolerance: 0.25 },
+  ],
+  hints: {
+    subjectInFrame: 'keep the lowrider in frame — {value}, needs {min}',
+    beatSync: 'hop off the beat — {value} off on average, land within {max} ({hits}/{count} hit)',
+    cameraHeight: 'camera too high — {value}, keep it under {max}',
+    duration_s: 'aim for an {target} take — this one ran {value}',
+  },
+  reward: { stars: 3, unlock: 'hydraulics-three-wheel' },
+  takesMax: 3,
+  authoredBy: 'human',
+};
+
+/** The tutor's mission order on the dev cell (M3.5 → M4 slice). */
+export const MISSIONS_V0: Mission[] = [MISSION_LOW_AND_SLOW, MISSION_HOP_ON_THE_ONE];

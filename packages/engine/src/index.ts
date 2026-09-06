@@ -8,3 +8,4 @@ export * from './physics/world';
 export * from './actors/character';
 export * from './camera/cameraRig';
 export * from './props/props';
+export * from './vehicles/lowrider';

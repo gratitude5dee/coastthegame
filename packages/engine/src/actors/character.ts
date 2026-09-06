@@ -108,6 +108,11 @@ export class CharacterController {
     if (this.speed > 0.2) this.yaw = Math.atan2(-m.x, -m.z); // three.js forward is -Z
   }
 
+  /** Park the capsule while the player drives (PHY-3): its collider stops blocking the car; `teleport` on exit. */
+  setActive(active: boolean) {
+    this.body.setEnabled(active);
+  }
+
   /** Teleport (respawn, cell change). */
   teleport(feet: THREE.Vector3) {
     const c = feet.clone().add(new THREE.Vector3(0, this.halfHeight + this.radius, 0));

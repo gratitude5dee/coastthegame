@@ -160,6 +160,7 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
   const verdictEl = h('div', 'mc-verdict');
   verdictEl.hidden = true;
   el.append(head, sub, chips, state, verdictEl);
+  el.hidden = true; // nothing to show until the tutor briefs (brief/update/verdict reveal it)
   parent.appendChild(el);
 
   let mission: Mission | undefined;

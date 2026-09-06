@@ -26,6 +26,7 @@ export interface Shot {
 }
 
 export * from './missions';
+export * from './beats';
 
 /** Queued (async) generative renders (GEN table). Dream (live restyle) is NOT a job — it is a WebRTC session, see DreamSession. */
 export type GenMode = 'draft_turbo' | 'faithful_vace' | 'hero_h3';

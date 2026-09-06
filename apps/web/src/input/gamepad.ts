@@ -1,6 +1,9 @@
 import type { FrameInput, InputProvider } from './intents';
 
-/** Gamepad provider (standard mapping): left stick move, right stick look, A jump, X grab, B throw, Y mode, LB sprint, RB undo. */
+/**
+ * Gamepad provider (standard mapping): left stick move, right stick look, A jump/hop, X grab/enter, B throw, Y mode,
+ * LB sprint/handbrake, RB undo, Start action, RT (button 7) hop-on-the-beat, d-pad = hydraulic switchbox.
+ */
 export class GamepadProvider implements InputProvider {
   readonly id = 'gamepad';
   private prev = new Map<number, boolean>();
@@ -29,7 +32,12 @@ export class GamepadProvider implements InputProvider {
     if (edge(3)) out.modeCycle = true; // Y
     if (edge(5)) out.undo = true; // RB
     if (edge(9)) out.action = true; // Start
+    if (edge(7)) out.beatToggle = true; // RT
     out.sprint = out.sprint || pressed(4); // LB
+    if (pressed(12)) out.hydro.y += 1; // d-pad up = front up
+    if (pressed(13)) out.hydro.y -= 1; // down = back up
+    if (pressed(14)) out.hydro.x -= 1; // left side up
+    if (pressed(15)) out.hydro.x += 1; // right side up
   }
 
   dispose() {}

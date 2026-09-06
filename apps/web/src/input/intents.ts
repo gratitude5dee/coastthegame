@@ -24,6 +24,9 @@ export interface FrameInput {
   resetEdge: boolean; // edge
   action: boolean; // edge — Enter / ACTION button: roll or cut a take
   playback: boolean; // edge — P: replay the last take
+  /** Hydraulic switchbox, held: x = −1 left side up … +1 right side up; y = +1 front up … −1 back up (I/J/K/L, d-pad). */
+  hydro: THREE.Vector2;
+  beatToggle: boolean; // edge — H / BEAT: hop on the beat grid (auto-hydraulics + metronome)
   sceneKey: number | null; // 1-based scene slot
   /** Normalised device coords of the pointer (-1..1), when known. */
   pointer: THREE.Vector2 | null;
@@ -49,6 +52,8 @@ export function newFrameInput(): FrameInput {
     resetEdge: false,
     action: false,
     playback: false,
+    hydro: new THREE.Vector2(),
+    beatToggle: false,
     sceneKey: null,
     pointer: null,
     pointerLocked: false,
@@ -59,6 +64,7 @@ export function newFrameInput(): FrameInput {
 export function resetFrameInput(f: FrameInput) {
   f.move.set(0, 0);
   f.look.set(0, 0);
+  f.hydro.set(0, 0);
   f.zoom = 1;
   f.jump =
     f.interact =
@@ -72,6 +78,7 @@ export function resetFrameInput(f: FrameInput) {
     f.resetEdge =
     f.action =
     f.playback =
+    f.beatToggle =
       false;
   f.sceneKey = null;
   f.sprint = false;

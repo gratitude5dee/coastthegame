@@ -34,6 +34,24 @@ skills/             vendored SKILL.md files for the coding agent
 tests/              unit + e2e
 ```
 
+## Playing the dev build
+
+Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints (phone). URL params for QA: `?scene=valley|street|sutro|butterfly`, `?cell=<id>` (Marble cell), `?cam=actor|director|producer`, `?physics=1`, `?mission=1|2` (auto-brief), `?vehicle=1` (start in the lowrider), `?beat=1` (hydraulics on the beat), `?perf=1`, `?tier=desktop|phone|quest|fallback`.
+
+| Do                                        | Keyboard / mouse                              | Touch                   | Gamepad         |
+| ----------------------------------------- | --------------------------------------------- | ----------------------- | --------------- |
+| Move · look · sprint · jump               | WASD · drag / pointer lock · Shift · Space    | left stick · right drag | sticks · LB · A |
+| Actor / director / producer               | Tab                                           | MODE                    | Y               |
+| Grab / drop · throw                       | E · F                                         | GRAB · tap              | X · B           |
+| Put that there                            | click a prop, then click the ground · Z undo  | tap, tap                | — (voice in M5) |
+| Talk to the Photographer → mission        | walk up to the blue NPC                       | same                    | same            |
+| Action / cut a take · replay              | Enter · P                                     | ACTION                  | Start           |
+| Lowrider: get in / out                    | E next to it                                  | GRAB→EXIT               | X               |
+| Drive · handbrake · hop                   | WASD · Shift · Space (Shift+Space = all four) | stick · HOP             | sticks · LB · A |
+| Hydraulic switches (hold)                 | I front · K back · J left · L right           | LIFT (front)            | d-pad           |
+| Hop on the beat (auto-hydraulics + click) | H                                             | BEAT                    | RT              |
+| Time of day · collider debug · reset      | T · C · R                                     | —                       | —               |
+
 ## Status
 
-Milestone **M0 — Foundation** (see `docs/tasks.md`). The seed renders a sample Spark splat with tier detection; everything else is spec.
+Milestone **M3 — actor mode** on sample worlds (see `docs/tasks.md`): Rapier physics with splat-derived ground, the character, props with put-that-there, the **lowrider** (raycast vehicle + hydraulics + beat grid), the camera rig, and the **M3.5 vertical slice** (missions → takes → verdict → billboard/download). Marble cells (M2) wire in as soon as a World Labs key lands in `.env`.

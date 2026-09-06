@@ -4,6 +4,7 @@ import type { FrameInput, InputProvider } from './intents';
 /**
  * Keyboard + mouse provider. Actor mode uses pointer lock (click the canvas); director/producer use drag-to-look.
  * Wheel zooms the follow distance. Left click = select/place (put-that-there fallback, DIR-3).
+ * Driving: WASD throttle/steer, Space hop, Shift handbrake, I/J/K/L hydraulic switches, H hop on the beat, E get out.
  */
 export class KeyboardMouseProvider implements InputProvider {
   readonly id = 'kbm';
@@ -61,6 +62,12 @@ export class KeyboardMouseProvider implements InputProvider {
     out.resetEdge = out.resetEdge || this.edges.has('KeyR');
     out.action = out.action || this.edges.has('Enter') || this.edges.has('NumpadEnter');
     out.playback = out.playback || this.edges.has('KeyP');
+    out.beatToggle = out.beatToggle || this.edges.has('KeyH');
+    // Hydraulic switchbox (held): I front, K back, J left, L right.
+    if (d.has('KeyI')) out.hydro.y += 1;
+    if (d.has('KeyK')) out.hydro.y -= 1;
+    if (d.has('KeyJ')) out.hydro.x -= 1;
+    if (d.has('KeyL')) out.hydro.x += 1;
     for (let i = 1; i <= 4; i++) if (this.edges.has(`Digit${i}`)) out.sceneKey = i;
 
     const locked = document.pointerLockElement === this.canvas;

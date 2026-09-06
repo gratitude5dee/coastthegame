@@ -3,7 +3,9 @@ import type { FrameInput, InputProvider } from './intents';
 
 /**
  * Touch provider (goal.md INP-2, iPhone tier): left half = virtual move stick, right half = look drag,
- * tap (short, no drag) = select/place, on-screen buttons for jump / mode / grab. Pattern from Spark's mobile-joystick example.
+ * tap (short, no drag) = select/place, on-screen buttons for action / jump / grab / mode. Pattern from Spark's
+ * mobile-joystick example. While driving (`setDriving(true)`, PHY-3 "touch: on-screen pedals") the stick is
+ * throttle/steer, JUMP reads HOP, GRAB reads EXIT, and two more buttons appear: LIFT (hold = front up) and BEAT.
  */
 export class TouchProvider implements InputProvider {
   readonly id = 'touch';
@@ -16,6 +18,8 @@ export class TouchProvider implements InputProvider {
   private lookMoved = 0;
   private tapNdc: THREE.Vector2 | null = null;
   private edges = new Set<string>();
+  private held = new Set<string>();
+  private driving = false;
   private root: HTMLDivElement;
   private stickBase: HTMLDivElement;
   private stickKnob: HTMLDivElement;
@@ -30,8 +34,11 @@ export class TouchProvider implements InputProvider {
       <div id="stick-base" style="position:absolute;left:24px;bottom:96px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);display:none">
         <div id="stick-knob" style="position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(255,181,74,.6)"></div>
       </div>
-      <div style="position:absolute;right:20px;bottom:100px;display:flex;flex-direction:column;gap:12px;pointer-events:auto">
+      <div id="touch-buttons" style="position:absolute;right:20px;bottom:100px;display:flex;flex-direction:column;gap:12px;pointer-events:auto">
         ${btn('action', 'ACTION')}${btn('jump', 'JUMP')}${btn('grab', 'GRAB')}${btn('mode', 'MODE')}
+      </div>
+      <div id="touch-drive" style="position:absolute;right:96px;bottom:100px;display:none;flex-direction:column;gap:12px;pointer-events:auto">
+        ${btn('lift', 'LIFT')}${btn('beat', 'BEAT')}
       </div>`;
     document.body.appendChild(this.root);
     this.stickBase = this.root.querySelector('#stick-base')!;
@@ -42,24 +49,46 @@ export class TouchProvider implements InputProvider {
       ['jump', 'jump'],
       ['grab', 'interact'],
       ['mode', 'modeCycle'],
+      ['beat', 'beatToggle'],
     ] as const) {
       this.root.querySelector(`#btn-${id}`)!.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         this.edges.add(edge);
       });
     }
+    const lift = this.root.querySelector('#btn-lift')!;
+    const liftOn = (e: Event) => {
+      e.preventDefault();
+      this.held.add('lift');
+    };
+    const liftOff = () => this.held.delete('lift');
+    lift.addEventListener('pointerdown', liftOn);
+    lift.addEventListener('pointerup', liftOff);
+    lift.addEventListener('pointercancel', liftOff);
+    lift.addEventListener('pointerleave', liftOff);
     canvas.addEventListener('touchstart', this.onStart, { passive: false });
     canvas.addEventListener('touchmove', this.onMove, { passive: false });
     canvas.addEventListener('touchend', this.onEnd, { passive: false });
     canvas.addEventListener('touchcancel', this.onEnd, { passive: false });
   }
 
+  /** Relabel the buttons for the lowrider (PHY-3): JUMP→HOP, GRAB→EXIT, plus LIFT / BEAT. */
+  setDriving(v: boolean) {
+    if (v === this.driving) return;
+    this.driving = v;
+    this.root.querySelector('#btn-jump')!.textContent = v ? 'HOP' : 'JUMP';
+    this.root.querySelector('#btn-grab')!.textContent = v ? 'EXIT' : 'GRAB';
+    (this.root.querySelector('#touch-drive') as HTMLElement).style.display = v ? 'flex' : 'none';
+    if (!v) this.held.clear();
+  }
+
   poll(_dt: number, out: FrameInput) {
     if (this.moveId !== null) {
       out.move.x += this.moveVec.x;
       out.move.y += this.moveVec.y;
-      out.sprint = out.sprint || this.moveVec.length() > 0.92;
+      if (!this.driving) out.sprint = out.sprint || this.moveVec.length() > 0.92; // full deflection = run (never brake)
     }
+    if (this.held.has('lift')) out.hydro.y += 1;
     out.look.x += this.lookDelta.x * this.sensitivity;
     out.look.y += this.lookDelta.y * this.sensitivity;
     this.lookDelta.set(0, 0);
@@ -72,6 +101,7 @@ export class TouchProvider implements InputProvider {
     if (this.edges.has('interact')) out.interact = true;
     if (this.edges.has('modeCycle')) out.modeCycle = true;
     if (this.edges.has('action')) out.action = true;
+    if (this.edges.has('beatToggle')) out.beatToggle = true;
     this.edges.clear();
   }
 

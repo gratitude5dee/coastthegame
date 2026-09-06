@@ -35,7 +35,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 
 - [x] KCC + intents: KB/M (pointer lock / drag), touch sticks + buttons, gamepad (XR sticks/teleport and footsteps pending)
 - [~] Grab/throw primitive props + click-to-select → click-to-place put-that-there with ghost + undo (SDF tagging wall, VR hands pending)
-- [ ] Lowrider raycast vehicle + beat-driven hydraulics (PHY-3)
+- [x] Lowrider raycast vehicle (`packages/engine/src/vehicles/lowrider.ts`: Rapier DynamicRayCastVehicleController, arcade tuning pinned by Node tests) + hydraulics (held switches I/J/K/L · d-pad · LIFT, hops with corner impulses) + enter/exit + chase/driver cams + touch pedals (PHY-3); beat grid `BeatClock` + metronome drive auto-hops (H) — placeholder body until the Tripo hero car (M4)
+- [x] M3.5 slice: missions 1–2 (`MISSIONS_V0`: Low & slow → Hop on the one, beatSync judged on manual hops), take clip via `captureStream(0)` + `requestFrame` (robust at low fps), Photographer hands out the next mission after a ≥1★ verdict
 - [ ] Gates QB-1/2/3/4 with real-device `/perf` reports (desktop, Quest 3, iPhone)
 
 ## M4 — Characters & NPCs (CHR-_, ACT-_)
