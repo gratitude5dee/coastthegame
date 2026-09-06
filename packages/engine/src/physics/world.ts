@@ -29,6 +29,8 @@ export interface GroundGrid {
   cellSize: number;
   /** World-space rect of the cells that had real samples (the rest is hole-filled); the fence hugs this when present. */
   coverage?: { minX: number; minZ: number; maxX: number; maxZ: number };
+  /** How many cells had real samples (diagnostics: 0 = the estimator saw no splats). */
+  sampled?: number;
 }
 
 export class PhysicsWorld {

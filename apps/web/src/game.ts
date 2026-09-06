@@ -132,6 +132,7 @@ declare global {
       cols: number;
       cellSize: number;
       coverage?: { minX: number; minZ: number; maxX: number; maxZ: number };
+      sampled: number;
     };
   }
 }
@@ -515,6 +516,7 @@ export class Game {
         cols: this.ground.cols,
         cellSize: this.ground.cellSize,
         coverage: this.ground.coverage,
+        sampled: this.ground.sampled ?? 0,
       };
       this.groundMesh = new THREE.Mesh(
         geometry,

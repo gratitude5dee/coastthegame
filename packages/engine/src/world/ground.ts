@@ -22,6 +22,22 @@ export interface GroundOptions {
   maxDeviation?: number;
 }
 
+/**
+ * Where the splats actually live: with `lod: true` Spark moves the data into `packedSplats.lodSplats` (the LoD tree —
+ * leaves plus merged parents) and the base set reports 0 splats, so `mesh.forEachSplat` iterates nothing. The merged
+ * parents are large and get dropped by `maxScale`.
+ */
+function splatSource(splat: SplatMesh): Pick<SplatMesh, 'forEachSplat'> {
+  return splat.packedSplats?.lodSplats ?? splat.extSplats?.lodSplats ?? splat;
+}
+
+/** Number of splats the ground estimator will see (0 means the mesh is not loaded yet or the LoD data moved). */
+export function countSplats(splat: SplatMesh): number {
+  let n = 0;
+  splatSource(splat).forEachSplat(() => n++);
+  return n;
+}
+
 export function groundFromSplats(splat: SplatMesh, opts: GroundOptions = {}): GroundGrid {
   const halfExtent = opts.halfExtent ?? 24;
   const cellSize = opts.cellSize ?? 0.75;
@@ -40,7 +56,7 @@ export function groundFromSplats(splat: SplatMesh, opts: GroundOptions = {}): Gr
   const m = splat.matrixWorld;
   const buckets: number[][] = new Array(cols * rows);
   const p = new THREE.Vector3();
-  splat.forEachSplat((_i, c, scales, _q, opacity) => {
+  splatSource(splat).forEachSplat((_i, c, scales, _q, opacity) => {
     if (opacity < minOpacity) return;
     const s = Math.max(scales.x, scales.y, scales.z) * splat.scale.x;
     if (s > maxScale) return;
@@ -139,5 +155,5 @@ export function groundFromSplats(splat: SplatMesh, opts: GroundOptions = {}): Gr
     }
   }
 
-  return { heights: smooth, cols, rows, minX, minZ, cellSize, ...(coverage ? { coverage } : {}) };
+  return { heights: smooth, cols, rows, minX, minZ, cellSize, sampled: xs.length, ...(coverage ? { coverage } : {}) };
 }

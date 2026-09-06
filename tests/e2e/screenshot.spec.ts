@@ -76,6 +76,10 @@ test('physics smoke: rapier + character controller step without errors', async (
   await page.waitForFunction(() => ((window as unknown as { __coastSteps?: number }).__coastSteps ?? 0) > 60, null, { timeout: 60_000 });
   expect(errors, errors.join('\n')).toHaveLength(0);
   expect(await page.locator('#hud').innerText()).toContain('physics');
+  // The ground came from the splats (LoD data lives in packedSplats.lodSplats — a regression here reads 0 splats and
+  // leaves a flat y=0 plane). The butterfly is ~1 m wide, so only a handful of 0.75 m cells carry real samples.
+  const ground = await page.evaluate(() => window.__coastGround);
+  expect(ground?.sampled ?? 0).toBeGreaterThan(0);
   // Loading choreography (UX-3): the title card wipes away once fetch + detail + physics are in — never a stuck screen.
   await expect(page.locator('#coast-load')).toBeHidden({ timeout: 60_000 });
 });
