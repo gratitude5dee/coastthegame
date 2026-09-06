@@ -33,8 +33,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 
 ## M3 — Actor mode ×3 platforms (ACT/INP/PHY/CAM-4)
 
-- [ ] KCC + intents: KB/M, touch sticks, gamepad, XR sticks/teleport; footsteps
-- [ ] Grab/throw props; SDF tagging wall; VR hand fog-touch + paint (Quest 3)
+- [x] KCC + intents: KB/M (pointer lock / drag), touch sticks + buttons, gamepad (XR sticks/teleport and footsteps pending)
+- [~] Grab/throw primitive props + click-to-select → click-to-place put-that-there with ghost + undo (SDF tagging wall, VR hands pending)
 - [ ] Lowrider raycast vehicle + beat-driven hydraulics (PHY-3)
 - [ ] Gates QB-1/2/3/4 with real-device `/perf` reports (desktop, Quest 3, iPhone)
 

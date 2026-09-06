@@ -29,11 +29,17 @@ for (const shot of SHOTS) {
     // toHaveScreenshot captures twice and requires stability; SwiftShader needs a long timeout. HUD text is masked.
     await expect(page).toHaveScreenshot(`${shot.name}.png`, { maxDiffPixelRatio: 0.02, timeout: 120_000, mask: [page.locator('#hud')] });
     expect(errors, errors.join('\n')).toHaveLength(0);
-    const hud = await page.locator('#hud').innerText();
-    expect(hud).toContain('tier desktop');
+    expect(await page.locator('#hud').innerText()).toContain('tier desktop');
     // Guard against a silently empty frame (e.g. Spark auto-detection broken by `fileType: undefined`).
-    const rendered = Number((hud.match(/splats ([\d,]+)/)?.[1] ?? '0').replace(/,/g, ''));
-    expect(rendered).toBeGreaterThan(1000);
+    // The HUD refreshes every 10 frames (slow under SwiftShader), so poll it rather than reading once.
+    await page.waitForFunction(
+      () => {
+        const t = document.getElementById('hud')?.innerText ?? '';
+        return Number((t.match(/splats ([\d,]+)/)?.[1] ?? '0').replace(/,/g, '')) > 1000;
+      },
+      null,
+      { timeout: 60_000 },
+    );
   });
 }
 
@@ -50,5 +56,24 @@ test('boots the bare landing URL without page errors', async ({ page }) => {
     { timeout: 60_000 },
   );
   expect(errors, errors.join('\n')).toHaveLength(0);
-  expect(await page.locator('#hud').innerText()).toContain('M0 playground');
+  expect(await page.locator('#hud').innerText()).toContain('playground');
+});
+
+// Physics smoke (goal.md PHY-1/ACT-1): Rapier loads on demand, the ground grid is derived from the splats, and the
+// character steps at 60 Hz — verified headless on the local sample with `physics=1`.
+test('physics smoke: rapier + character controller step without errors', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  await page.goto('/?scene=butterfly&physics=1&cam=director&tier=desktop');
+  await page.waitForFunction(() => (window as unknown as { __coastPhysics?: boolean }).__coastPhysics === true, null, { timeout: 90_000 });
+  await page.waitForFunction(() => ((window as unknown as { __coastSteps?: number }).__coastSteps ?? 0) > 30, null, { timeout: 60_000 });
+  // Walk forward for a moment and confirm the loop keeps stepping.
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(800);
+  await page.keyboard.up('KeyW');
+  await page.keyboard.press('Tab'); // mode cycle (QB-4 marks)
+  await page.waitForFunction(() => ((window as unknown as { __coastSteps?: number }).__coastSteps ?? 0) > 60, null, { timeout: 60_000 });
+  expect(errors, errors.join('\n')).toHaveLength(0);
+  expect(await page.locator('#hud').innerText()).toContain('physics');
 });

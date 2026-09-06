@@ -3,3 +3,8 @@ export * from './platform/budgets';
 export * from './intents/intents';
 export * from './camera/rig';
 export * from './world/cell';
+export * from './world/ground';
+export * from './physics/world';
+export * from './actors/character';
+export * from './camera/cameraRig';
+export * from './props/props';
