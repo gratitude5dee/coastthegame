@@ -1,0 +1,62 @@
+{
+  "name": "camera low, follow the car, put that there",
+  "description": "A director-mode session: two spoken directions, a pointing pair for 'put that there', one query. Recorded shape of the OpenAI Realtime event stream (redacted: no audio, no ids beyond call ids).",
+  "clicks": [
+    { "at": 5400, "pointerHit": "crate_1", "groundPoint": [2, 0, -3] },
+    { "at": 6600, "groundPoint": [5, 0, -6] }
+  ],
+  "events": [
+    { "at": 0, "type": "session.created", "session": { "id": "sess_redacted" } },
+    { "at": 20, "type": "session.updated" },
+    { "at": 1000, "type": "input_audio_buffer.speech_started" },
+    { "at": 2600, "type": "input_audio_buffer.speech_stopped" },
+    { "at": 2900, "type": "conversation.item.input_audio_transcription.completed", "transcript": "Camera low, follow the car." },
+    {
+      "at": 3100,
+      "type": "response.output_item.done",
+      "item": { "type": "function_call", "call_id": "call_1", "name": "camera", "arguments": "{\"shot\":\"low\"}" }
+    },
+    {
+      "at": 3150,
+      "type": "response.output_item.done",
+      "item": { "type": "function_call", "call_id": "call_2", "name": "camera", "arguments": "{\"follow\":{\"desc\":\"the car\"}}" }
+    },
+    {
+      "at": 3200,
+      "type": "response.output_item.done",
+      "item": { "type": "function_call", "call_id": "call_2", "name": "camera", "arguments": "{\"follow\":{\"desc\":\"the car\"}}" }
+    },
+    { "at": 3500, "type": "response.output_audio_transcript.done", "transcript": "Low and on the car." },
+    { "at": 3600, "type": "response.done" },
+    { "at": 5000, "type": "input_audio_buffer.speech_started" },
+    { "at": 7000, "type": "input_audio_buffer.speech_stopped" },
+    { "at": 7300, "type": "conversation.item.input_audio_transcription.completed", "transcript": "Put that there." },
+    {
+      "at": 7500,
+      "type": "response.output_item.done",
+      "item": {
+        "type": "function_call",
+        "call_id": "call_3",
+        "name": "move",
+        "arguments": "{\"obj\":{\"deictic\":\"that\",\"ordinal\":1},\"place\":{\"deictic\":\"there\",\"ordinal\":2}}"
+      }
+    },
+    { "at": 7800, "type": "response.output_audio_transcript.done", "transcript": "Done." },
+    { "at": 7900, "type": "response.done" },
+    { "at": 9000, "type": "input_audio_buffer.speech_started" },
+    { "at": 9800, "type": "input_audio_buffer.speech_stopped" },
+    { "at": 10000, "type": "conversation.item.input_audio_transcription.completed", "transcript": "What crates are there?" },
+    {
+      "at": 10200,
+      "type": "response.output_item.done",
+      "item": { "type": "function_call", "call_id": "call_4", "name": "query_scene", "arguments": "{\"filter\":\"crate\"}" }
+    },
+    {
+      "at": 10400,
+      "type": "response.output_item.done",
+      "item": { "type": "function_call", "call_id": "call_5", "name": "teleport_player", "arguments": "{}" }
+    },
+    { "at": 10500, "type": "response.output_audio_transcript.done", "transcript": "Two crates." },
+    { "at": 10600, "type": "response.done" }
+  ]
+}

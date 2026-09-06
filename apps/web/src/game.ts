@@ -51,9 +51,10 @@ import { Metronome } from './audio/metronome';
 import { Sfx } from './audio/sfx';
 import { NpcSystem, type Npc, type NpcSpec } from './npc/npcs';
 import { GhostActor } from './studio/ghosts';
-import type { CameraRequest, SceneOps, UtteranceOutcome } from '@coast/director';
+import { RealtimeClient, type CameraRequest, type SceneOps, type UtteranceOutcome } from '@coast/director';
 import { DirectorConsole, summarize } from './director/console';
 import { VoiceInput } from './director/voice';
+import { connectRealtime, type RealtimeSession } from './director/realtimeWebrtc';
 import { createSubtitles, type Subtitles } from './ui/subtitles';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
 
@@ -288,6 +289,10 @@ export class Game {
   private pttWasHeld = false;
   /** A cut is rendering: the live loop is paused (see `exportScene`). */
   private exporting = false;
+  /** The scene surface the director acts on (shared by the typed console and the Realtime client). */
+  private ops: SceneOps | null = null;
+  /** The OpenAI Realtime voice director (DIR-1), when `?voice=realtime` and the Worker can mint a secret. */
+  private realtime: { client: RealtimeClient; session: RealtimeSession } | null = null;
   private billboard: THREE.Mesh | null = null;
   private billboardVideo: HTMLVideoElement | null = null;
   private readonly frustum = new THREE.Frustum();
@@ -361,7 +366,8 @@ export class Game {
     document.body.appendChild(this.crosshair);
 
     if (!this.isShot) {
-      this.director = new DirectorConsole(document.body, this.sceneOps(), this.deixis, {
+      this.ops = this.sceneOps();
+      this.director = new DirectorConsole(document.body, this.ops, this.deixis, {
         mode: () => this.rig.mode,
         forward: () => {
           const f = this.camera.getWorldDirection(this.tmpV);
@@ -391,6 +397,7 @@ export class Game {
         },
       });
       this.syncVoiceHook();
+      if (params.get('voice') === 'realtime') void this.startRealtime(params.get('premium') === '1');
     }
 
     if (this.isShot)
@@ -1186,7 +1193,13 @@ export class Game {
     }
     if (i.cancel) this.props?.select(null);
     if (i.say && this.director && !this.inXr) this.director.toggle();
-    if (this.voice && !this.typing) {
+    if (this.realtime) {
+      // The voice director is live (server VAD): ` toggles the microphone instead of pushing to talk.
+      if (i.ptt && !this.pttWasHeld) {
+        this.realtime.session.setMuted(!this.realtime.session.muted);
+        this.hint = this.realtime.session.muted ? 'mic muted — ` to unmute' : 'voice director live — just talk';
+      }
+    } else if (this.voice && !this.typing) {
       // Push-to-talk: hold ` / LT / MIC — the transcript directs on release.
       if (i.ptt && !this.pttWasHeld) this.voice.start();
       else if (!i.ptt && this.pttWasHeld) this.voice.stop();
@@ -1689,6 +1702,77 @@ export class Game {
     this.rig.setMode(mode);
     this.kbm.setPointerLockDesired(mode === 'actor');
     if (mode === 'actor') this.followId = null;
+    this.realtime?.client.refreshTools(); // CAM-8: the voice director sees only this mode's tools
+  }
+
+  /**
+   * The Realtime voice director (DIR-1): the Worker mints the secret, the browser talks WebRTC, the model's tool
+   * calls run through the same executor as the `/` bar. Without a key (503) or a budget (402) the browser recogniser
+   * stays the voice path.
+   */
+  private async startRealtime(premium = false) {
+    if (this.realtime || !this.director || !this.ops) return;
+    const client = new RealtimeClient({
+      executor: this.director.executor,
+      ops: this.ops,
+      buffer: this.deixis,
+      mode: () => this.rig.mode,
+      speakerForward: () => {
+        const f = this.camera.getWorldDirection(this.tmpV);
+        return [f.x, f.z];
+      },
+      sceneSummary: () => this.sceneSummary(),
+      missionBrief: () => {
+        const st = this.studio;
+        if (!st || st.state === 'idle') return null;
+        return `${st.mission.title} — ${st.mission.constraints.map((c) => c.kind).join(', ')} (take ${st.takesUsed + 1} of ${st.mission.takesMax})`;
+      },
+      onTranscript: (text) => {
+        this.subtitles ??= createSubtitles(document.body);
+        this.subtitles.say(this.identity.name, text, 3000);
+      },
+      onAssistant: (text) => {
+        this.subtitles ??= createSubtitles(document.body);
+        this.subtitles.say('Director', text, 4000);
+      },
+      onAct: (env, result) => {
+        window.__coastDirector = {
+          text: `${env.act.op} (voice)`,
+          ok: [result.ok],
+          summary: result.ok ? `✓ ${env.act.op}` : `✗ ${result.error ?? result.question ?? env.act.op}`,
+          follow: this.followId,
+          shot: { distance: this.rig.params.distance, height: this.rig.params.height, fovDeg: this.rig.params.fovDeg },
+        };
+        this.updateHint();
+      },
+      onState: (state, detail) => {
+        window.__coastVoice = { supported: true, state: `realtime:${state}${detail ? ` (${detail})` : ''}` };
+        if (state === 'error') this.hint = `voice director: ${detail ?? 'error'}`;
+        if (state === 'closed') this.realtime = null;
+      },
+    });
+    try {
+      const session = await connectRealtime({ sessionId: this.opts.sessionId, client, premium });
+      this.realtime = { client, session };
+      this.hint = 'voice director live — just talk (` mutes the mic)';
+    } catch (e) {
+      this.hint = `voice director unavailable: ${e instanceof Error ? e.message : String(e)} — hold \` for browser speech`;
+      window.__coastVoice = { supported: this.voice?.supported ?? false, state: `realtime:unavailable` };
+    }
+  }
+
+  /** ≤ 2 KB of what is on set, for the model's context (DIR-1 scene summary). */
+  private sceneSummary() {
+    return {
+      mode: this.rig.mode,
+      me: this.identity.id,
+      props: [...(this.props?.props.values() ?? [])].map((p) => p.spec.id),
+      people: (this.npcs?.npcs ?? []).map((n) => `${n.spec.id}:${n.spec.name}`),
+      car: this.vehicle ? 'lowrider' : null,
+      time: this.timePreset,
+      recording: this.studio?.state === 'recording',
+      takes: this.studio?.set.size ?? 0,
+    };
   }
 
   private syncVoiceHook() {

@@ -37,7 +37,7 @@ tests/              unit + e2e
 
 ## Playing the dev build
 
-Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints (phone). URL params for QA: `?scene=valley|street|sutro|butterfly`, `?cell=<id>` (Marble cell), `?cam=actor|director|producer`, `?physics=1`, `?mission=1|2` (auto-brief), `?vehicle=1` (start in the lowrider), `?beat=1` (hydraulics on the beat), `?say=camera low, follow the car` (a direction once the world is up), `?perf=1`, `?tier=desktop|phone|quest|fallback`.
+Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints (phone). URL params for QA: `?scene=valley|street|sutro|butterfly`, `?cell=<id>` (Marble cell), `?cam=actor|director|producer`, `?physics=1`, `?mission=1|2` (auto-brief), `?vehicle=1` (start in the lowrider), `?beat=1` (hydraulics on the beat), `?say=camera low, follow the car` (a direction once the world is up), `?voice=realtime` (the OpenAI voice director, needs the Worker + key), `?perf=1`, `?tier=desktop|phone|quest|fallback`.
 
 | Do                                             | Keyboard / mouse                                                                                       | Touch                   | Gamepad         |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------- | --------------- |
