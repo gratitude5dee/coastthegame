@@ -64,7 +64,7 @@ const SCENES: Record<string, SceneDef> = {
     url: 'https://sparkjs.dev/assets/splats/valley.spz',
     position: [0, 0, 0],
     scale: 0.5, // as in Spark's webxr example
-    camera: { pos: [0, 1.6, 2.5], lookAt: [0, 1.2, -4] },
+    camera: { pos: [0, 2.2, -0.5], lookAt: [0, 1.6, -8] },
     world: true,
   },
   street: {
