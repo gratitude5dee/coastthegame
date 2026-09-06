@@ -125,6 +125,13 @@ declare global {
     __coastSteps?: number;
     __coastPhysics?: boolean;
     __coastVehicle?: { driving: boolean; speed: number; pos: [number, number, number]; hops: number; wheels: number; autoHop: boolean };
+    __coastGround?: {
+      minX: number;
+      minZ: number;
+      cols: number;
+      cellSize: number;
+      coverage?: { minX: number; minZ: number; maxX: number; maxZ: number };
+    };
   }
 }
 
@@ -499,7 +506,14 @@ export class Game {
       // Ground from the splats themselves (PHY-1 fallback). Centre the grid on the spawn.
       this.ground = groundFromSplats(this.splat, { center: spawnXZ, halfExtent: 40, cellSize: 0.75 });
       const { geometry } = physics.addGroundGrid(this.ground);
-      physics.addFence(this.ground, 4); // the block ends where the ground grid ends — nobody drives off the world
+      physics.addFence(this.ground, 4); // the block ends where the scan ends — nobody drives off the world
+      window.__coastGround = {
+        minX: this.ground.minX,
+        minZ: this.ground.minZ,
+        cols: this.ground.cols,
+        cellSize: this.ground.cellSize,
+        coverage: this.ground.coverage,
+      };
       this.groundMesh = new THREE.Mesh(
         geometry,
         new THREE.MeshBasicMaterial({ color: 0x3fd0ff, wireframe: true, transparent: true, opacity: 0.35 }),
