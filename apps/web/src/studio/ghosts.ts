@@ -79,6 +79,19 @@ export class GhostActor {
     this.group.visible = v;
   }
 
+  /** Solid for an export (the performer is the shot), translucent while blocking on set. */
+  setSolid(solid: boolean) {
+    this.group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const mat = m.material as THREE.MeshStandardMaterial;
+      mat.transparent = !solid;
+      mat.opacity = solid ? 1 : GHOST_OPACITY;
+      mat.depthWrite = solid;
+      mat.needsUpdate = true;
+    });
+  }
+
   /** Place the ghost at a replayed pose; a driving pose shows the car instead of the body. */
   setPose(pose: TakePose) {
     this.group.position.set(pose.pos[0], pose.pos[1], pose.pos[2]);

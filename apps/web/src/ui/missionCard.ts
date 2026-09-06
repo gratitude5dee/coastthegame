@@ -16,7 +16,14 @@ export interface MissionCard {
   /** Per-frame: chip scores from `ShotMeter.live()` (same order as `mission.constraints`), the clock, and the take count. */
   update(results: ConstraintResult[], elapsedS: number, recording: boolean, takesUsed: number, takesMax: number): void;
   /** Show the judge's verdict (MIS-3). Buttons/links appear only for the options that are provided. */
-  verdict(v: Verdict, opts?: { downloadUrl?: string; downloadName?: string; onRetake?: () => void; onPlayback?: () => void }): void;
+  verdict(
+    v: Verdict,
+    opts?: { downloadUrl?: string; downloadName?: string; onRetake?: () => void; onPlayback?: () => void; onExport?: () => void },
+  ): void;
+  /** Cut export (STU-3) feedback on the verdict view: progress, the finished file, or what went wrong. */
+  exportProgress(done: number, total: number): void;
+  exportReady(url: string, name: string): void;
+  exportFailed(message: string): void;
   /** Override the idle state line (e.g. the tutor's example command). Cleared by the next `brief()`. */
   setStatus(text: string): void;
   hide(): void;
@@ -165,6 +172,7 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
 
   let mission: Mission | undefined;
   let chipList: Chip[] = [];
+  let exportBtn: HTMLButtonElement | null = null;
   let idleStatus = IDLE_STATUS;
   let takesUsed = 0;
   let takesMax = 3;
@@ -284,6 +292,15 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
         dl.download = opts.downloadName ?? `${v.missionId}-${v.takeId}.webm`;
         actions.append(dl);
       }
+      exportBtn = null;
+      if (opts.onExport) {
+        const cut = h('button', 'mc-btn', 'Cut → MP4');
+        cut.type = 'button';
+        cut.dataset.act = 'export';
+        cut.addEventListener('click', () => opts.onExport?.());
+        actions.append(cut);
+        exportBtn = cut;
+      }
 
       verdictEl.replaceChildren(stars);
       if (v.aesthetic) verdictEl.append(h('div', 'mc-aes', `look ${Math.round(v.aesthetic.score)} / 10 · advisory`));
@@ -294,6 +311,25 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
     setStatus(text) {
       idleStatus = text;
       if (el.dataset.view === 'meter' && state.dataset.rec !== '1') setState(text);
+    },
+    exportProgress(done, total) {
+      if (!exportBtn) return;
+      exportBtn.disabled = true;
+      exportBtn.textContent = `rendering ${done} / ${total}`;
+    },
+    exportReady(url, name) {
+      if (!exportBtn) return;
+      const dl = h('a', 'mc-btn', `Download cut .${name.split('.').pop() ?? 'mp4'}`);
+      dl.dataset.act = 'cut';
+      dl.href = url;
+      dl.download = name;
+      exportBtn.replaceWith(dl);
+      exportBtn = null;
+    },
+    exportFailed(message) {
+      if (!exportBtn) return;
+      exportBtn.disabled = false;
+      exportBtn.textContent = `Cut → MP4 (${message})`;
     },
     hide() {
       el.hidden = true;

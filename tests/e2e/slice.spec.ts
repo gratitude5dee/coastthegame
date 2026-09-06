@@ -58,6 +58,13 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   await page.keyboard.press('Enter'); // cut
   await page.waitForSelector('.mc-verdict', { timeout: 120_000 });
   await page.waitForFunction(() => (window as unknown as { __coastStudio?: S }).__coastStudio?.setSize === 2, null, { timeout: 60_000 });
+  // Cut export (STU-3): the set re-renders at a fixed step into an MP4 through WebCodecs + Mediabunny — a small one
+  // here (the first bar at 10 fps, 320×180) so software GL finishes in seconds.
+  const cut = await page.evaluate(() => window.__coastExport!({ width: 320, height: 180, fps: 10, bars: [1, 1] }));
+  expect(cut.frames).toBe(26); // one bar at 92 bpm = 2.6 s
+  expect(cut.bytes).toBeGreaterThan(2000);
+  expect(cut.mime).toMatch(/^video\/(mp4|webm)/);
+  await expect(page.locator('.mc-state')).toBeVisible(); // the live loop resumed (the card keeps updating)
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 

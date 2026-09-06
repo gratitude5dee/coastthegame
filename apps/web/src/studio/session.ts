@@ -14,8 +14,10 @@ import {
   ShotMeter,
   TakeRecorder,
   TakeSet,
+  planCut,
   setTime,
   takeStore,
+  type CutOptions,
   type ConstraintResult,
   type MeterSample,
   type Mission,
@@ -26,6 +28,7 @@ import {
 } from '@coast/studio';
 import { createMissionCard, type MissionCard } from '../ui/missionCard';
 import { GhostActor, type ActorLook } from './ghosts';
+import { exportCut, type ExportResult, type ExportScene } from './exporter';
 
 /** Gives a ghost body to a take's performer (the game knows the looks; tests get capsules). */
 export type GhostFactory = (actorId: string) => GhostActor;
@@ -97,6 +100,10 @@ export class StudioSession {
     camQuat: [0, 0, 0, 1],
   };
   private readonly makeGhost: GhostFactory;
+  /** The game lends its renderer/scene/camera for an export (null on surfaces that cannot export, e.g. XR). */
+  exportScene: (() => Omit<ExportScene, 'seek'>) | null = null;
+  lastCutUrl: string | null = null;
+  exporting = false;
 
   constructor(
     parent: HTMLElement,
@@ -310,6 +317,7 @@ export class StudioSession {
       downloadName: `coast-${this.mission.id}-take${this.takesUsed}.${ext}`,
       onRetake: this.takesUsed < this.mission.takesMax ? () => this.retake() : undefined,
       onPlayback: () => this.startPlayback(performance.now()),
+      ...(this.exportScene && this.set.size > 0 ? { onExport: () => void this.exportCutToCard() } : {}),
     });
     this.onClip?.(this.lastClipUrl, verdict);
     this.startPlayback(performance.now(), true);
@@ -378,6 +386,71 @@ export class StudioSession {
     for (let i = 0; i < this.ghosts.length; i++) {
       const pose = this.set.poseAt(i, t, this.ghostPose);
       if (pose) this.ghosts[i]!.setPose(pose);
+    }
+  }
+
+  /**
+   * Export the set as a Coast Cut (STU-1/STU-3): fixed-step, every take solid, the newest take's camera. Returns the
+   * encoded clip; the card shows progress and the download.
+   */
+  async exportCut(opts: Omit<CutOptions, 'durationS'> = {}, onProgress?: (done: number, total: number) => void): Promise<ExportResult> {
+    if (!this.exportScene) throw new Error('export is not available here');
+    if (this.set.size === 0) throw new Error('nothing to export — cut a take first');
+    if (this.exporting) throw new Error('already exporting');
+    const plan = planCut({ durationS: this.set.durationS, cameraLayer: this.set.size - 1, ...opts });
+    const camLayer = this.set.layers[Math.min(Math.max(0, plan.cameraLayer), this.set.size - 1)]!;
+    const host = this.exportScene();
+    const wasPlaying = this.playing;
+    const camPose: TakePose = { pos: [0, 0, 0], yaw: 0, speed: 0, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
+    this.exporting = true;
+    this.stopPlayback();
+    try {
+      return await exportCut(
+        plan,
+        {
+          renderer: host.renderer,
+          scene: host.scene,
+          camera: host.camera,
+          begin: () => {
+            host.begin();
+            for (const g of this.ghosts) {
+              g.setSolid(true);
+              g.visible = true;
+            }
+          },
+          seek: (t) => {
+            for (let i = 0; i < this.ghosts.length; i++) {
+              const pose = this.set.poseAt(i, t, this.ghostPose);
+              if (pose) this.ghosts[i]!.setPose(pose);
+            }
+            const c = camLayer.player.poseAt(t, camPose);
+            host.camera.position.set(c.camPos[0], c.camPos[1], c.camPos[2]);
+            host.camera.quaternion.set(c.camQuat[0], c.camQuat[1], c.camQuat[2], c.camQuat[3]);
+          },
+          end: () => {
+            for (const g of this.ghosts) g.setSolid(false);
+            host.end();
+            if (wasPlaying) this.startPlayback(performance.now(), true);
+            else for (const g of this.ghosts) g.visible = false;
+          },
+        },
+        onProgress,
+      );
+    } finally {
+      this.exporting = false;
+    }
+  }
+
+  private async exportCutToCard() {
+    try {
+      const r = await this.exportCut({}, (done, total) => this.card.exportProgress(done, total));
+      if (this.lastCutUrl) URL.revokeObjectURL(this.lastCutUrl);
+      this.lastCutUrl = URL.createObjectURL(r.blob);
+      this.card.exportReady(this.lastCutUrl, `coast-cut-${this.mission.id}.${r.ext}`);
+      performance.mark('coast:cut-exported');
+    } catch (e) {
+      console.warn('cut export failed', e);
+      this.card.exportFailed(e instanceof Error ? e.message : String(e));
     }
   }
 

@@ -173,6 +173,12 @@ declare global {
     };
     __coastSay?: (text: string) => UtteranceOutcome;
     __coastVoice?: { supported: boolean; state: string };
+    __coastExport?: (opts?: {
+      fps?: number;
+      width?: number;
+      height?: number;
+      bars?: [number, number];
+    }) => Promise<{ bytes: number; mime: string; codec: string; ext: string; frames: number; seconds: number }>;
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -280,6 +286,8 @@ export class Game {
   /** Push-to-talk speech recognition feeding the console (browser Web Speech; the Realtime client replaces it in M5). */
   private voice: VoiceInput | null = null;
   private pttWasHeld = false;
+  /** A cut is rendering: the live loop is paused (see `exportScene`). */
+  private exporting = false;
   private billboard: THREE.Mesh | null = null;
   private billboardVideo: HTMLVideoElement | null = null;
   private readonly frustum = new THREE.Frustum();
@@ -1029,6 +1037,28 @@ export class Game {
     );
     studio.onClip = (url) => this.showClip(url);
     studio.actorId = this.identity.id;
+    // Cut export (STU-3): the session borrows the renderer; the live loop pauses and the live body hides meanwhile.
+    studio.exportScene = () => ({
+      renderer: this.renderer,
+      scene: this.scene,
+      camera: this.camera,
+      begin: () => {
+        this.exporting = true;
+        this.renderer.setAnimationLoop(null);
+        this.playerMesh.visible = false;
+        this.props?.select(null);
+      },
+      end: () => {
+        this.exporting = false;
+        this.last = performance.now();
+        this.renderer.setAnimationLoop((time) => this.tick(time));
+        this.updateHint();
+      },
+    });
+    window.__coastExport = async (opts) => {
+      const r = await studio.exportCut(opts ?? {});
+      return { bytes: r.blob.size, mime: r.mime, codec: r.codec, ext: r.ext, frames: r.frames, seconds: r.seconds };
+    };
     this.studio = studio;
     if (missionParam > 0) studio.brief(); // QA: `?mission=n` auto-briefs mission n
   }
@@ -2024,6 +2054,7 @@ export class Game {
     const p = this.props;
     const beat = this.autoHop ? ' · H beat off' : ' · H hop on the beat';
     if (!this.physicsReady) this.hint = 'loading physics…';
+    else if (this.exporting) this.hint = 'rendering the cut…';
     else if (this.inXr)
       this.hint = this.diorama
         ? 'diorama: B back to life-size'

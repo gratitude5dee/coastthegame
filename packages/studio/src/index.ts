@@ -4,6 +4,7 @@
  */
 export * from './takes';
 export * from './set';
+export * from './export';
 
 export type PassName = 'beauty' | 'depth' | 'normal' | 'id' | 'pose';
 

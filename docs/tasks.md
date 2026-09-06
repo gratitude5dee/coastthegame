@@ -56,7 +56,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 
 ## M6 — Studio & generative video (STU-_, GEN-_)
 
-- [ ] Fixed-step recording + passes + Mediabunny export + R2 upload; billboard replay
+- [~] Fixed-step recording + passes + Mediabunny export + R2 upload; billboard replay — **Cut → MP4** (`packages/studio/src/export.ts` plans the frames: whole set or a bar range, 30 fps, ≤60 s; `apps/web/src/studio/exporter.ts` re-renders the set solid at a fixed step, the newest take's camera, 1080p through WebCodecs → Mediabunny MP4/WebM; the verdict card's button + `__coastExport`) — passes, R2 upload, server-side audio mux pending; billboard replay ✓ (real-time clip)
 - [ ] Cut assembly on beat grid, captions, 16:9 + 9:16, provenance manifest
 - [ ] fal jobs (Turbo draft / VACE faithful / H3 hero) via Queue + JobDO; Dream mode (Lucy) desktop
 - [ ] Gates QB-9, QB-10 (budget ledger)
