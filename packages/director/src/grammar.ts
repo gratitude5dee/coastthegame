@@ -7,7 +7,7 @@
  * Deixis: every that/this/it/there/here in the utterance is counted (the client stamps `deicticTotal`) and each
  * deictic reference carries its 1-based ordinal among them, so the resolver can pair words with pointing events.
  */
-import type { CameraMove, ObjectRef, PlaceRef, Relation, RigMode, SceneAct, ShotName } from './schema';
+import type { CameraMove, LookName, ObjectRef, PlaceRef, Relation, RigMode, SceneAct, ShotName } from './schema';
 
 /** Replies to a question the executor asked ("this one?", "there?"): not scene acts, they finish a pending one. */
 export type Meta =
@@ -117,6 +117,16 @@ export function parseUtterance(text: string): Utterance {
     // ── perspective ──
     else if ((m = /^(?:(?:go|switch|switch to|be|to) )?(actor|director|producer)(?: mode| view)?$/.exec(c))) {
       acts.push({ op: 'set_mode', mode: m[1] as RigMode });
+    }
+    // ── looks (MIS-6: the film stock on the picture) — before the light words: "neon night" is a look, "night" a time;
+    // a bare "35mm" stays a lens (CAM-6), the look wants "35mm dusk" or a look word ("the 35mm stock") ──
+    else if (
+      (m =
+        /^(?:(?:use|give me|make it|shoot|shoot it|grade|grade it|go|switch to|set|film|film it|put on|try) )?(?:(?:the|a|an|in) )?(clean|35 ?mm dusk|dusk 35 ?mm|35 ?mm(?= (?:look|grade|stock|film|lut|filter)$)|vhs(?: 1994| 94)?|noir|neon(?: night)?|monochrome|mono)(?: look| grade| stock| film| lut| filter)?$/.exec(
+          c,
+        ))
+    ) {
+      acts.push({ op: 'set_look', preset: lookNameFor(m[1]!) });
     }
     // ── light & weather ──
     else if (/(golden hour|sunset|sundown|magic hour|golden)/.test(c)) acts.push({ op: 'set_time', preset: 'golden' });
@@ -268,4 +278,13 @@ function parseMeta(c: string): Meta | null {
             ? 'near'
             : 'far';
   return { kind: 'pick', which };
+}
+
+/** The look a spoken name means (`schema.ts` LookName). */
+function lookNameFor(word: string): LookName {
+  if (word.startsWith('35') || word.startsWith('dusk')) return '35mm-dusk';
+  if (word.startsWith('vhs')) return 'vhs-1994';
+  if (word === 'noir' || word === 'monochrome' || word === 'mono') return 'noir';
+  if (word.startsWith('neon')) return 'neon-night';
+  return 'clean';
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { captionTrack, captionsAt, lookFor } from '../../packages/studio/src/captions';
+import { captionTrack, captionsAt } from '../../packages/studio/src/captions';
 import type { TakeV1 } from '../../packages/studio/src/takes';
 
 /** goal.md STU cut assembly / MIS-6: title card, the director's markers, end card, a look per mission. */
@@ -43,13 +43,10 @@ describe('captionTrack', () => {
     expect(captionsAt(track, 9).map((c) => c.kind)).toEqual(['end', 'credit']);
   });
 
-  it('fits short cuts (no end card when there is no room) and knows its looks', () => {
+  it('fits short cuts (no end card when there is no room)', () => {
     const short = captionTrack({ title: 'x', durationS: 2 });
     expect(short.map((c) => c.kind)).toEqual(['title']);
     expect(short[0]!.to).toBe(2);
     expect(captionTrack({ title: 'x', durationS: 0 })).toEqual([]);
-    expect(lookFor('35mm-dusk').label).toBe('35 mm dusk');
-    expect(lookFor('nope').filter).toBe('none');
-    expect(lookFor(undefined).vignette).toBe(0);
   });
 });

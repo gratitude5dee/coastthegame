@@ -15,6 +15,8 @@ export * from './world/paint';
 export * from './world/level';
 export * from './world/transition';
 export * from './world/grade';
+export * from './render/looks';
+// `render/post` (the postprocessing stack) is its own entry — `@coast/engine/post` — loaded on demand (QB-3).
 export * from './audio/stride';
 export * from './npc/brain';
 export * from './npc/crowd';

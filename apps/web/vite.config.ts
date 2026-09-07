@@ -31,6 +31,8 @@ function manualChunks(id: string): string | undefined {
   // so an optional tool cannot fatten the chunk every player downloads.
   if (/\/node_modules\/three\/build\//.test(id)) return 'three';
   if (/\/node_modules\/@sparkjsdev\/spark\//.test(id)) return 'spark';
+  // The post stack (`@coast/engine/post` → postprocessing) is loaded on demand: desktop live, every tier at export.
+  if (/\/node_modules\/postprocessing\//.test(id)) return 'post';
   return undefined;
 }
 

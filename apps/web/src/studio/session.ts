@@ -130,6 +130,8 @@ export class StudioSession {
   private review: { set: TakeSet; ghosts: GhostActor[]; missionId: string } | null = null;
   /** The game persists the reel (localStorage) and redraws the strip. */
   onReel: ((reel: Reel) => void) | null = null;
+  /** The mission names the look (MIS-6): the game puts it on the post stack when the mission is briefed. */
+  onLook: ((look: string) => void) | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -168,6 +170,7 @@ export class StudioSession {
     if (this.state !== 'idle') return;
     this.state = 'briefed';
     this.card.brief(this.mission);
+    this.onLook?.(this.mission.look);
     this.card.setStatus(
       this.takesUsed > 0
         ? `Take ${this.takesUsed + 1} of ${this.mission.takesMax} — Enter (or ACTION) to roll`
@@ -489,7 +492,6 @@ export class StudioSession {
     const plan = planCut({ durationS: this.set.durationS, cameraLayer: this.set.size - 1, ...cut });
     const m = this.mission;
     const overlay: Overlay = {
-      look: m.look,
       captions: captions
         ? captionTrack({
             title: m.title,
@@ -502,7 +504,9 @@ export class StudioSession {
     };
     const takes = this.set.layers.map((l) => l.take);
     const path = this.cameraPath && this.cameraPath.length >= 2 ? new CameraPath(this.cameraPath) : null;
-    // The provenance manifest (STU-5): everything the picture came from, hashed to the file once it exists.
+    const host = this.exportScene();
+    // The provenance manifest (STU-5): everything the picture came from, hashed to the file once it exists. The look
+    // is the one actually rendered (the director may have changed it from the mission's).
     const manifestFor = (r: ExportResult, sha256?: string): CutManifest =>
       buildCutManifest({
         id: cutId ?? `${m.id}-${Date.now().toString(36)}`,
@@ -511,7 +515,7 @@ export class StudioSession {
         trackId: m.trackId,
         barRange: m.barRange,
         bpm: DEFAULT_BEAT_GRID.bpm,
-        look: m.look,
+        look: host.look?.() ?? m.look,
         takes,
         plan,
         captions: overlay.captions ?? [],
@@ -522,7 +526,6 @@ export class StudioSession {
         app: { version: __COAST_VERSION__, commit: __COAST_COMMIT__ },
       });
     const camLayer = this.set.layers[Math.min(Math.max(0, plan.cameraLayer), this.set.size - 1)]!;
-    const host = this.exportScene();
     const wasPlaying = this.playing;
     const camPose: TakePose = { pos: [0, 0, 0], yaw: 0, speed: 0, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
     this.exporting = true;
@@ -552,6 +555,8 @@ export class StudioSession {
             host.camera.quaternion.set(c.camQuat[0], c.camQuat[1], c.camQuat[2], c.camQuat[3]);
           },
           ...(host.frame ? { frame: host.frame } : {}),
+          ...(host.render ? { render: host.render } : {}),
+          ...(host.prepare ? { prepare: host.prepare } : {}),
           end: () => {
             for (const g of this.ghosts) g.setSolid(false);
             host.end();

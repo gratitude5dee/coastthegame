@@ -1,7 +1,7 @@
 /**
- * Cut assembly (goal.md STU cut assembly, MIS-6 looks): what goes over the picture. A title card (mission · section ·
- * look), the director's markers ("mark beat drop") at their times, an end card, and a look = a simple grade the
- * compositor applies (LUTs proper arrive with the art direction pack). Pure: the exporter draws these.
+ * Cut assembly (goal.md STU cut assembly): what goes over the picture. A title card (mission · section), the
+ * director's markers ("mark beat drop") at their times, an end card. Pure: the exporter draws these. The mission's
+ * look is not a caption — it is the post LUT the engine renders through (`packages/engine/src/render/looks.ts`).
  */
 import type { TakeV1 } from './takes';
 
@@ -48,16 +48,4 @@ export function captionTrack(o: CaptionOptions): Caption[] {
 /** Captions visible at `tS`. */
 export function captionsAt(track: Caption[], tS: number): Caption[] {
   return track.filter((c) => tS >= c.from && tS < c.to);
-}
-
-/** A look's grade as CSS filter functions the 2D compositor can apply (canvas `ctx.filter`). */
-export const LOOKS: Record<string, { filter: string; vignette: number; label: string }> = {
-  '35mm-dusk': { filter: 'contrast(1.08) saturate(1.15) sepia(0.12)', vignette: 0.35, label: '35 mm dusk' },
-  'vhs-1994': { filter: 'contrast(0.95) saturate(1.3) blur(0.4px)', vignette: 0.2, label: 'VHS 1994' },
-  noir: { filter: 'grayscale(1) contrast(1.25)', vignette: 0.5, label: 'noir' },
-  clean: { filter: 'none', vignette: 0, label: 'clean' },
-};
-
-export function lookFor(name: string | undefined) {
-  return LOOKS[name ?? ''] ?? LOOKS.clean!;
 }

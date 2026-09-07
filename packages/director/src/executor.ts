@@ -7,7 +7,7 @@
 import type { DeixisBuffer } from '@coast/engine';
 import { resolveObject, resolvePlace, type ResolveContext, type SceneIndex, type SpeechWindow } from './deixis';
 import { parseUtterance, type Meta, type Utterance } from './grammar';
-import type { ActEnvelope, ActResult, CameraMove, ObjectRef, RigMode, SceneAct, ShotName, CameraPathOp } from './schema';
+import type { ActEnvelope, ActResult, CameraMove, LookName, ObjectRef, RigMode, SceneAct, ShotName, CameraPathOp } from './schema';
 
 export type TimePresetName = 'noon' | 'golden' | 'blue' | 'night' | 'fog_noon';
 export type WeatherKind = 'fog' | 'clear' | 'rain';
@@ -36,6 +36,8 @@ export interface SceneOps extends SceneIndex {
   spawn(asset: string, pos: [number, number, number]): string | null;
   setTime(preset: TimePresetName): boolean;
   setWeather(kind: WeatherKind, amount?: number): boolean;
+  /** The look (post LUT) by name; false where there is no post stack or the name is unknown. */
+  setLook(name: LookName): boolean;
   possess(id: string): boolean;
   playAnim(id: string, clip: string): boolean;
   replay(): boolean;
@@ -313,6 +315,8 @@ export class ActExecutor {
         return act.preset && ops.setTime(act.preset) ? done('time') : NOT_HERE('that time of day');
       case 'set_weather':
         return ops.setWeather(act.kind, act.amount) ? done('weather') : NOT_HERE(`${act.kind} weather`);
+      case 'set_look':
+        return ops.setLook(act.preset) ? done('look') : NOT_HERE(`the ${act.preset} look`);
       case 'play_anim': {
         const a = this.ref(act.actor, ctx);
         if (!a.id) return a.result!;

@@ -20,6 +20,7 @@
     "@sparkjsdev/spark": "2.1.0",
     "iwer": "2.3.0",
     "mediabunny": "1.55.7",
+    "postprocessing": "6.39.4",
     "recast-navigation": "0.43.1",
     "three": "0.180.0"
   },

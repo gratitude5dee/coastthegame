@@ -30,6 +30,7 @@ function scene() {
     spawn: () => null,
     setTime: () => true,
     setWeather: () => false,
+    setLook: () => false,
     possess: () => false,
     playAnim: () => false,
     replay: () => false,

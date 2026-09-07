@@ -65,6 +65,9 @@ importers:
       mediabunny:
         specifier: 1.55.7
         version: 1.55.7
+      postprocessing:
+        specifier: 6.39.4
+        version: 6.39.4(three@0.180.0)
       recast-navigation:
         specifier: 0.43.1
         version: 0.43.1
@@ -103,6 +106,9 @@ importers:
       '@sparkjsdev/spark':
         specifier: 2.1.0
         version: 2.1.0(three@0.180.0)
+      postprocessing:
+        specifier: 6.39.4
+        version: 6.39.4(three@0.180.0)
       recast-navigation:
         specifier: 0.43.1
         version: 0.43.1
@@ -1714,6 +1720,11 @@ packages:
   postcss@8.5.28:
     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
     engines: {node: ^10 || ^12 || >=14}
+
+  postprocessing@6.39.4:
+    resolution: {integrity: sha512-oAS/PjAbc/xT3OzjUrGsorJ4J064XwhVD2t0OwKLP/E8QwDMUJ0oOv6ZI1SYMtLchv4g0ySEx+JcLy92+48vlA==}
+    peerDependencies:
+      three: '>= 0.168.0 < 0.186.0'
 
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
@@ -3363,6 +3374,10 @@ snapshots:
       nanoid: 3.3.18
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  postprocessing@6.39.4(three@0.180.0):
+    dependencies:
+      three: 0.180.0
 
   prelude-ls@1.2.1: {}
 

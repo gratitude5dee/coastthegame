@@ -3,7 +3,8 @@
  * a light — a dyno colour modifier on every splat (tint · exposure, saturation, lift, and distance fog), a sky dome
  * shader (zenith / horizon / ground gradient, a sun, stars at night), matching three lights for the GLB props and
  * NPCs, and `scene.fog` with the same colour and density so meshes fade like splats. Presets tween into each other
- * so "golden hour" said out loud is a dissolve, not a cut. The post LUT (AF-7 `postprocessing`) is the next layer.
+ * so "golden hour" said out loud is a dissolve, not a cut. The preset's share of the post grade (a contrast and a
+ * lift the post LUT folds in under the mission's look, `render/post.ts`) tweens with the rest.
  */
 import * as THREE from 'three';
 import { dyno, type SplatMesh } from '@sparkjsdev/spark';
@@ -37,8 +38,10 @@ export interface Grade {
   hemi: { sky: number; ground: number; intensity: number };
   /** Base atmosphere of the preset; the weather adds to it. */
   fog: { color: number; density: number };
-  /** Emissive boost for signage and the lowrider's lights (night-neon). */
+  /** Emissive boost for signage and the lowrider's lights (night-neon); the post stack's bloom follows it. */
   neon: number;
+  /** The preset's share of the post LUT: contrast about middle grey and a lift, under the mission's look. */
+  post: { contrast: number; lift: number };
 }
 
 export const GRADES: Record<TimeOfDay, Grade> = {
@@ -62,6 +65,7 @@ export const GRADES: Record<TimeOfDay, Grade> = {
     hemi: { sky: 0xdbe8f5, ground: 0x2e3540, intensity: 1.0 },
     fog: { color: 0xc9dbe8, density: 0.004 },
     neon: 0,
+    post: { contrast: 1, lift: 0 },
   },
   golden: {
     label: 'golden hour',
@@ -83,6 +87,7 @@ export const GRADES: Record<TimeOfDay, Grade> = {
     hemi: { sky: 0xffcf9a, ground: 0x3a2c30, intensity: 0.8 },
     fog: { color: 0xf1b27a, density: 0.006 },
     neon: 0.2,
+    post: { contrast: 1.05, lift: 0 },
   },
   blue: {
     label: 'blue hour',
@@ -104,6 +109,7 @@ export const GRADES: Record<TimeOfDay, Grade> = {
     hemi: { sky: 0x7d8fc7, ground: 0x151a26, intensity: 0.7 },
     fog: { color: 0x5f6f9e, density: 0.007 },
     neon: 0.7,
+    post: { contrast: 1, lift: 0.01 },
   },
   night: {
     label: 'night',
@@ -125,6 +131,7 @@ export const GRADES: Record<TimeOfDay, Grade> = {
     hemi: { sky: 0x2a3560, ground: 0x0b0d14, intensity: 0.55 },
     fog: { color: 0x141a30, density: 0.009 },
     neon: 1,
+    post: { contrast: 1.1, lift: 0 },
   },
   fog_noon: {
     label: 'fog noon',
@@ -146,6 +153,7 @@ export const GRADES: Record<TimeOfDay, Grade> = {
     hemi: { sky: 0xe4e8ec, ground: 0x7a828a, intensity: 1.1 },
     fog: { color: 0xd6dce2, density: 0.035 },
     neon: 0.1,
+    post: { contrast: 0.92, lift: 0.03 },
   },
 };
 
@@ -185,6 +193,8 @@ export interface GradeState {
   fogColor: THREE.Color;
   fogDensity: number;
   neon: number;
+  postContrast: number;
+  postLift: number;
 }
 
 export function gradeState(g: Grade, extraFog = 0, out?: GradeState): GradeState {
@@ -208,6 +218,8 @@ export function gradeState(g: Grade, extraFog = 0, out?: GradeState): GradeState
     fogColor: new THREE.Color(),
     fogDensity: 0,
     neon: 0,
+    postContrast: 1,
+    postLift: 0,
   };
   s.tint.set(g.tint[0], g.tint[1], g.tint[2]);
   s.saturation = g.saturation;
@@ -228,6 +240,8 @@ export function gradeState(g: Grade, extraFog = 0, out?: GradeState): GradeState
   s.fogColor.set(g.fog.color);
   s.fogDensity = g.fog.density + extraFog;
   s.neon = g.neon;
+  s.postContrast = g.post.contrast;
+  s.postLift = g.post.lift;
   return s;
 }
 
@@ -252,6 +266,8 @@ export function lerpGradeState(out: GradeState, target: GradeState, t: number): 
   out.fogColor.lerp(target.fogColor, t);
   out.fogDensity += (target.fogDensity - out.fogDensity) * t;
   out.neon += (target.neon - out.neon) * t;
+  out.postContrast += (target.postContrast - out.postContrast) * t;
+  out.postLift += (target.postLift - out.postLift) * t;
   return out;
 }
 

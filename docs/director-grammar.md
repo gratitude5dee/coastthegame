@@ -73,6 +73,18 @@ also drives the **cut export** instead of a take's recorded camera.
 | _noon_ · _midday_ · _daylight_                          | `set_time fog_noon`          |
 | _fog_ · _misty_ · _haze_ · _rain_ · _drizzle_ · _clear_ | `set_weather fog/rain/clear` |
 
+## Looks (director, producer)
+
+The mission names the look (MIS-6) and puts it on at the brief; these words change it, live and in the cut — the manifest records the look that was rendered. A leading _use / make it / shoot it / grade it / go / switch to / put on / try_ is optional, so is a trailing _look / grade / stock / film / LUT / filter_. _neon night_ is a look; _night_ alone is the time of day; a bare _35mm_ is still the lens — the look is _35mm dusk_ or _the 35mm stock_.
+
+| Words                                        | Act                   |
+| -------------------------------------------- | --------------------- |
+| _clean_ · _clean look_                       | `set_look clean`      |
+| _35mm dusk_ · _dusk 35mm_ · _the 35mm stock_ | `set_look 35mm-dusk`  |
+| _vhs_ · _vhs 1994_ · _vhs 94_                | `set_look vhs-1994`   |
+| _noir_ · _monochrome_ · _mono_               | `set_look noir`       |
+| _neon_ · _neon night_                        | `set_look neon-night` |
+
 ## The world (producer; _put / move_ also from director)
 
 | Say                                                                                               | Act                                                      |

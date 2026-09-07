@@ -32,6 +32,7 @@ import {
   HOP_CORNERS,
   Atmosphere,
   TIME_ORDER,
+  isLookName,
   CellStreamer,
   Corridor,
   LevelGraph,
@@ -52,6 +53,7 @@ import {
   DeixisBuffer,
   type DeixisSample,
 } from '@coast/engine';
+import type { PostStack } from '@coast/engine/post';
 import { BeatClock, type MeterSample } from '@coast/studio';
 import { newFrameInput, resetFrameInput, type FrameInput, type InputProvider } from './input/intents';
 import { KeyboardMouseProvider } from './input/keyboardMouse';
@@ -168,6 +170,20 @@ declare global {
     __coastShot?: () => Promise<string>;
     /** QA: draw calls in the last rendered frame (the splats count as one — 0 of them means Spark drew nothing yet). */
     __coastDraws?: number;
+    /** QA: the post stack — whether the frame goes through it, the look on it, the bloom, the passes. */
+    __coastPost?: () => {
+      enabled: boolean;
+      look: string;
+      live: boolean;
+      bloom?: number;
+      contrast?: number;
+      lift?: number;
+      passes?: string[];
+    };
+    /** QA: put a look on the picture (what "make it noir" does through the director). */
+    __coastLook?: (name: string) => boolean;
+    /** QA: run the live frame through the post stack or straight to the canvas (A/B the picture and the frame time). */
+    __coastPostLive?: (on: boolean) => void;
     __coastCells?: {
       active: string;
       resident: string[];
@@ -238,6 +254,13 @@ export class Game {
   private loading = '';
   private usingFallback = false;
   private timePreset: TimeOfDay = 'noon';
+  /** The look on the picture (MIS-6): the mission's at the brief, the director's after "make it noir". */
+  private lookName = 'clean';
+  /** The post stack (W-5 post LUT): live on tiers budgeted 'full'; every tier borrows one for the cut export. */
+  private post: PostStack | null = null;
+  private postLoading: Promise<PostStack> | null = null;
+  private postLive = false;
+  private postForExport = false;
   /** Time of day + weather as a grade on the splats, the sky, the lights and the fog (W-5). */
   private readonly atmosphere: Atmosphere;
 
@@ -359,6 +382,25 @@ export class Game {
       this.timePreset = timeParam as TimeOfDay;
       this.atmosphere.setTime(this.timePreset, true);
     }
+    // The post stack (W-5 post LUT, MIS-6 looks, AF-7 `postprocessing`): bloom for the neon, the look's 3D LUT,
+    // vignette, grain, aberration. Live where the budget says 'full' (`?post=1` / `?post=0` override); every tier
+    // renders the cut export through one; XR renders straight to the layer. `?look=` starts under a look.
+    this.postLive =
+      params.get('post') === '1' || (params.get('post') !== '0' && this.atmosphere.enabled && this.budgets.postProcessing === 'full');
+    const lookParam = params.get('look');
+    if (lookParam) this.setLook(lookParam);
+    if (this.postLive) void this.ensurePost();
+    window.__coastPost = () => ({
+      ...(this.post ? this.post.state() : {}),
+      enabled: !!this.post && (this.postLive || this.exporting),
+      live: this.postLive,
+      look: this.lookName,
+    });
+    window.__coastLook = (name) => this.setLook(name);
+    window.__coastPostLive = (on) => {
+      this.postLive = on;
+      if (on) void this.ensurePost();
+    };
 
     // Placeholder player (visible in director/producer): capsule + nose to show facing. Replaced by the $COAST rig in M4.
     this.playerMesh = new THREE.Group();
@@ -1387,10 +1429,16 @@ export class Game {
     };
     // Cut export (STU-3): the session borrows the renderer; the live loop pauses and the live body hides meanwhile.
     // A keyframed camera path with two keys or more drives the picture instead of a take's camera (CAM-7).
+    // Every tier renders the cut through the post stack (the look as a LUT, offline is affordable anywhere).
     studio.exportScene = () => ({
       renderer: this.renderer,
       scene: this.scene,
       camera: this.camera,
+      prepare: async () => {
+        if (this.post) return;
+        await this.ensurePost();
+        this.postForExport = !this.postLive; // borrowed for the cut: gone again at `end` (a live stack stays)
+      },
       begin: () => {
         this.exporting = true;
         this.rig.unlock();
@@ -1399,13 +1447,24 @@ export class Game {
         this.props?.select(null);
       },
       frame: () => this.atmosphere.frame(this.camera),
+      render: () => this.renderFrame(1 / 30),
+      look: () => this.lookName,
       end: () => {
+        if (this.postForExport) {
+          this.post?.dispose();
+          this.post = null;
+          this.postLoading = null;
+          this.postForExport = false;
+        }
         this.exporting = false;
         this.last = performance.now();
         this.renderer.setAnimationLoop((time) => this.tick(time));
         this.updateHint();
       },
     });
+    studio.onLook = (look) => {
+      if (!this.setLook(look)) console.warn(`mission look "${look}" is not a look the engine knows`);
+    };
     this.syncCameraPath();
     window.__coastExport = async (opts) => {
       const r = await studio.exportCut(opts ?? {});
@@ -1475,8 +1534,8 @@ export class Game {
       this.pendingBeat = null; // consumed by this frame's meter sample
     }
 
-    this.renderer.render(this.scene, this.camera);
-    window.__coastDraws = this.renderer.info.render.calls;
+    const post = this.renderFrame(dt);
+    window.__coastDraws = post ? post.sceneDraws : this.renderer.info.render.calls;
     if (this.shotRequests.length) {
       this.renderer.getContext().finish(); // software GL: make sure the instanced splat draw has landed before reading back
       const png = this.renderer.domElement.toDataURL('image/png');
@@ -1485,6 +1544,39 @@ export class Game {
     this.studio?.frameRendered();
     this.perf.tick(dtMs);
     if (this.frame++ % 10 === 0) this.renderHud();
+  }
+
+  /** The frame: through the post stack (grade share + look) when there is one and we are not presenting to an XR layer. */
+  private renderFrame(dt: number): PostStack | null {
+    const post = this.post && (this.postLive || this.exporting) && !this.renderer.xr.isPresenting ? this.post : null;
+    if (!post) {
+      this.renderer.render(this.scene, this.camera);
+      return null;
+    }
+    const s = this.atmosphere.state;
+    post.setGrade(s.postContrast, s.postLift, s.neon);
+    post.render(dt);
+    return post;
+  }
+
+  /** The post stack, loaded on demand (`@coast/engine/post` is its own chunk, QB-3) and wearing the current look. */
+  private async ensurePost(): Promise<PostStack> {
+    if (this.post) return this.post;
+    this.postLoading ??= import('@coast/engine/post').then(({ PostStack }) => {
+      const post = new PostStack(this.renderer, this.scene, this.camera);
+      post.setLook(this.lookName);
+      this.post ??= post;
+      return this.post;
+    });
+    return this.postLoading;
+  }
+
+  /** The look by name (MIS-6): remembered even where nothing renders it live, so the cut export gets it. */
+  private setLook(name: string): boolean {
+    if (!isLookName(name)) return false;
+    this.lookName = name;
+    this.post?.setLook(name);
+    return true;
   }
 
   private pollInput(dt: number) {
@@ -2396,6 +2488,7 @@ export class Game {
         this.atmosphere.setWeather(kind, amount ?? 0.6);
         return true;
       },
+      setLook: (name) => this.setLook(name),
       possess: (id) => {
         if (!this.npcs) return false;
         if (id === 'me') {
@@ -2633,6 +2726,6 @@ export class Game {
         : '') +
       (this.autoHop ? ` · beat ● ${this.beat.phase(performance.now()).bar + 1}.${this.beat.phase(performance.now()).beatInBar + 1}` : '') +
       this.streamingHud() +
-      `<br>mode <b>${this.rig.mode}</b> (Tab) · time <b>${this.timePreset}</b> (T) · / direct · scenes 1–4 · C collider · R reset · M ${this.sfx.isMuted ? 'unmute' : 'mute'}<br><span style="opacity:.8">${this.hint}</span>`;
+      `<br>mode <b>${this.rig.mode}</b> (Tab) · time <b>${this.timePreset}</b> (T) · look <b>${this.lookName}</b>${this.post ? '' : ' (export)'} · / direct · scenes 1–4 · C collider · R reset · M ${this.sfx.isMuted ? 'unmute' : 'mute'}<br><span style="opacity:.8">${this.hint}</span>`;
   }
 }

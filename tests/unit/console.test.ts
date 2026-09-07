@@ -21,6 +21,7 @@ function ops(log: string[]): SceneOps {
       return true;
     },
     setWeather: () => false,
+    setLook: () => false,
     possess: () => false,
     playAnim: () => false,
     replay: () => false,

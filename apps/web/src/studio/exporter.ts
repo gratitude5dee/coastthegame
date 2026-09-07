@@ -8,22 +8,27 @@
  * and `end` bracket the render (pause the live loop, hide the live body, restore sizes).
  */
 import * as THREE from 'three';
-import { captionsAt, frameTime, lookFor, type Caption, type CutPlan } from '@coast/studio';
+import { captionsAt, frameTime, type Caption, type CutPlan } from '@coast/studio';
 
 export interface ExportScene {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   seek: (tS: number) => void;
+  /** Async set-up before `begin` (the post stack loads on demand). */
+  prepare?: () => Promise<void>;
   begin: () => void;
   end: () => void;
   /** Camera-dependent per-frame work the live loop normally does (sky follow, fog origin) — after `seek`, before the render. */
   frame?: () => void;
+  /** Draws the frame — through the post stack (the mission's look as a LUT, W-5/MIS-6) when the host has one; else `renderer.render`. */
+  render?: () => void;
+  /** The look on the picture (the post stack's, which the director may have changed from the mission's) — for the manifest. */
+  look?: () => string;
 }
 
-/** What goes over the picture (cut assembly): a look (grade + vignette) and a caption track. */
+/** What goes over the picture (cut assembly): the caption track. The look is rendered, not composited (see `render`). */
 export interface Overlay {
-  look?: string;
   captions?: Caption[];
 }
 
@@ -75,11 +80,13 @@ export async function exportCut(
 
   const { renderer, scene, camera } = target;
   const canvas = renderer.domElement;
-  // The picture is composed on a 2D canvas: the WebGL frame, then the look and the captions (cut assembly).
+  const draw = target.render ?? (() => renderer.render(scene, camera));
+  // The picture is composed on a 2D canvas: the WebGL frame (already graded by the post stack), then the captions.
   const compositor = new Compositor(plan.width, plan.height, overlay);
   const source = new mb.CanvasSource(compositor.canvas, { codec, quality: mb.QUALITY_HIGH, keyFrameInterval: 2 });
   output.addVideoTrack(source, { frameRate: plan.fps });
 
+  await target.prepare?.();
   const prevSize = renderer.getSize(new THREE.Vector2());
   const prevPixelRatio = renderer.getPixelRatio();
   const prevAspect = camera.aspect;
@@ -96,7 +103,7 @@ export async function exportCut(
       const t = frameTime(plan, i);
       target.seek(t);
       target.frame?.();
-      renderer.render(scene, camera);
+      draw();
       compositor.compose(canvas, t - plan.startS);
       await source.add(i * dt, dt);
       onProgress?.(i + 1, plan.frameCount);
@@ -117,11 +124,10 @@ export async function exportCut(
   return { blob: new Blob([buffer], { type: mime }), mime, codec, ext, frames: plan.frameCount, seconds: plan.frameCount / plan.fps };
 }
 
-/** The 2D pass over each frame: grade + vignette for the look, then the captions (title card, markers, end card). */
+/** The 2D pass over each frame: the captions (title card, markers, end card) over the rendered picture. */
 class Compositor {
   readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly look;
   private readonly captions: Caption[];
 
   constructor(
@@ -135,23 +141,12 @@ class Compositor {
     const ctx = this.canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('no 2D canvas for the compositor');
     this.ctx = ctx;
-    this.look = lookFor(overlay.look);
     this.captions = overlay.captions ?? [];
   }
 
   compose(frame: HTMLCanvasElement, tS: number) {
     const { ctx, width: w, height: h } = this;
-    ctx.save();
-    ctx.filter = this.look.filter;
     ctx.drawImage(frame, 0, 0, w, h);
-    ctx.restore();
-    if (this.look.vignette > 0) {
-      const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.hypot(w, h) * 0.6);
-      g.addColorStop(0, 'rgba(0,0,0,0)');
-      g.addColorStop(1, `rgba(0,0,0,${this.look.vignette})`);
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-    }
     const portrait = h > w;
     const base = Math.round(Math.min(w, h) / (portrait ? 18 : 16));
     for (const c of captionsAt(this.captions, tS)) {

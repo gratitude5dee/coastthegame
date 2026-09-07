@@ -540,7 +540,7 @@ export const MISSION_HOP_ON_THE_ONE: Mission = {
   trackId: 'coast-demo',
   barRange: [17, 20],
   section: 'Hook',
-  look: '35mm-dusk',
+  look: 'vhs-1994',
   cell: 'valley',
   constraints: [
     { kind: 'subjectInFrame', subject: 'lowrider', minShare: 0.7 },

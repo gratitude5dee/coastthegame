@@ -31,6 +31,10 @@ export type CameraMove = 'push_in' | 'pull_out' | 'orbit' | 'crane_up' | 'crane_
 /** Keyframed paths (CAM-7): drop a key where the camera is, play the path (locked shot), stop / hand back, clear, drop the last key. */
 export type CameraPathOp = 'key' | 'play' | 'stop' | 'clear' | 'undo_key';
 
+/** The looks a mission names (MIS-6): the post LUT on the picture, live and in the cut (`packages/engine/src/render/looks.ts`). */
+export type LookName = 'clean' | '35mm-dusk' | 'vhs-1994' | 'noir' | 'neon-night';
+export const LOOK_NAMES: readonly LookName[] = ['clean', '35mm-dusk', 'vhs-1994', 'noir', 'neon-night'];
+
 export type SceneAct =
   | { op: 'spawn'; asset?: string; prompt?: string; place: PlaceRef; scale?: number; tags?: string[] }
   | { op: 'move'; obj: ObjectRef; place: PlaceRef; animate_ms?: number }
@@ -42,6 +46,7 @@ export type SceneAct =
   | { op: 'ungroup'; obj: ObjectRef }
   | { op: 'set_time'; preset?: 'golden' | 'blue' | 'night' | 'fog_noon'; hour?: number }
   | { op: 'set_weather'; kind: 'fog' | 'clear' | 'rain'; amount?: number }
+  | { op: 'set_look'; preset: LookName }
   | { op: 'play_anim'; actor: ObjectRef; clip: string; loop?: boolean }
   | { op: 'possess'; actor: ObjectRef }
   | { op: 'replay_take'; take: string; actor: ObjectRef }
@@ -98,6 +103,7 @@ export const TOOL_MODES: Record<string, RigMode[]> = {
   ungroup: ['producer'],
   set_time: ['producer', 'director'],
   set_weather: ['producer', 'director'],
+  set_look: ['producer', 'director'],
   // director — camera + performance + record
   play_anim: ['director'],
   possess: ['director', 'producer'],
@@ -240,6 +246,7 @@ const ALL_TOOLS = [
     hour: { type: 'number' },
   }),
   tool('set_weather', 'Set weather.', { kind: { enum: ['fog', 'clear', 'rain'] }, amount: { type: 'number' } }, ['kind']),
+  tool('set_look', 'Put a look (film stock LUT) on the picture, live and in the cut.', { preset: { enum: [...LOOK_NAMES] } }, ['preset']),
   tool('play_anim', 'Play an animation clip on an actor.', { actor: REF, clip: { type: 'string' }, loop: { type: 'boolean' } }, [
     'actor',
     'clip',

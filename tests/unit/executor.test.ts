@@ -60,6 +60,10 @@ function fakeScene() {
       return true;
     },
     setWeather: () => false,
+    setLook: (name) => {
+      log.push(`look ${name}`);
+      return name !== 'vhs-1994'; // this stage has no VHS
+    },
     possess: (id) => {
       log.push(`possess ${id}`);
       return true;
@@ -143,12 +147,24 @@ describe('ActExecutor', () => {
   it('camera, light, people and takes go straight through; unknown clauses come back as errors', () => {
     const { ops, log } = fakeScene();
     const ex = new ActExecutor(ops);
-    const out = say(ex, 'camera low, follow the car, golden hour, be the photographer, make it pop, action');
-    expect(out.results.map((r) => r.ok)).toEqual([true, true, true, true, false, false]);
-    expect(out.results[4]!.error).toMatch(/didn't get "make it pop"/);
-    expect(out.results[5]!.error).toMatch(/nothing to roll/);
-    expect(log).toEqual(['camera {"shot":"low"}', 'camera {"followId":"lowrider"}', 'time golden', 'possess photographer', 'record start']);
-    expect(ex.lastMentioned).toBe('photographer'); // people count as objects for "it"; camera / time do not
+    const out = say(
+      ex,
+      'camera low, follow the car, golden hour, make it noir, use the vhs look, be the photographer, make it pop, action',
+    );
+    expect(out.results.map((r) => r.ok)).toEqual([true, true, true, true, false, true, false, false]);
+    expect(out.results[4]!.error).toMatch(/the vhs-1994 look/); // the look the stage cannot do
+    expect(out.results[6]!.error).toMatch(/didn't get "make it pop"/);
+    expect(out.results[7]!.error).toMatch(/nothing to roll/);
+    expect(log).toEqual([
+      'camera {"shot":"low"}',
+      'camera {"followId":"lowrider"}',
+      'time golden',
+      'look noir',
+      'look vhs-1994',
+      'possess photographer',
+      'record start',
+    ]);
+    expect(ex.lastMentioned).toBe('photographer'); // people count as objects for "it"; camera / time / look do not
   });
 
   it('spawns "in front of me" by default and reports unknown assets', () => {

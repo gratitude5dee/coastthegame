@@ -452,7 +452,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 - [ ] Marble worlds generated for the hub + 4 cells from approved key art (+ text), exported (.spz 500k/full + collider + pano), orientation/scale fixed, `.rad` built, cells published to R2 with `cell.json` (SCH-1) + `level.json` (SCH-2); `docs/cells.md` lists costs.
 - [ ] Rapier trimesh from colliders; PHY-5 alignment ≤3% on every cell; spawn points and zones authored.
 - [~] Cell graph with streaming (W-3): walk from Garage → Pier → Alley without a loading screen; ≤2 cells resident — the streaming skeleton runs on the sample worlds (ADR-0009) until the Marble cells land.
-- [~] Time-of-day presets (W-5) and fog modifier ✓ — golden / blue hour / night / fog noon (+ noon) as a grade: a dyno colour modifier on every splat (tint, saturation, lift, exp² fog), a sky dome (gradient, sun, stars), matching lights for the meshes and `scene.fog`; presets dissolve into each other; `set_time` / `set_weather` drive it — post LUT and the pano env map pending; pano skybox loading choreography (UX-3) pending.
+- [~] Time-of-day presets (W-5) and fog modifier ✓ — golden / blue hour / night / fog noon (+ noon) as a grade: a dyno colour modifier on every splat (tint, saturation, lift, exp² fog), a sky dome (gradient, sun, stars), matching lights for the meshes and `scene.fog`; presets dissolve into each other; `set_time` / `set_weather` drive it; **post LUT ✓** (`packages/engine/src/render/post.ts` on `postprocessing`, ADR-0010: the mission's look as a baked 3D LUT + bloom for the neon + vignette / grain / aberration, live on desktop, through every cut export, on display-referred buffers so the splats blend as trained) — the pano env map pending; pano skybox loading choreography (UX-3) pending.
 - [ ] **Perf:** QB-1/2/3 met on desktop; Quest 3 and iPhone at least *render* the hub within budget (full gates at M3).
 
 ### M3 — Actor mode on all three platforms (target: 1 week)
@@ -482,7 +482,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 
 ### M6 — Studio & generative video (target: 1.5 weeks)
 - [~] Offline re-render (STU-1) ✓ beauty only — control passes (STU-2) pending; Mediabunny video export ✓ + server-side audio mux pending (STU-3); R2 upload ✓; replay on the billboard ✓.
-- [~] Cut assembly: captions (title, markers, end card), a look per mission, 16:9 + 9:16 ✓; **provenance manifest (STU-5)** ✓ (SCH-7, hash-checked upload, credits on the share page); beat-grid assembly across missions pending.
+- [~] Cut assembly: captions (title, markers, end card), **the look per mission as the post LUT (MIS-6 / STU-4)** ✓ (five looks; _make it noir_ changes it and the manifest says so), 16:9 + 9:16 ✓; **provenance manifest (STU-5)** ✓ (SCH-7, hash-checked upload, credits on the share page); beat-grid assembly across missions pending.
 - [ ] fal jobs: H3 Max Turbo draft (sync, ≤2/mission), VACE faithful + H3 hero (async, post-session, GEN-6) via Queue + DO status; Dream mode via Lucy on desktop behind the premium flag (GEN-5).
 - [ ] **Gate:** QB-9 (30 s cut ≤3 min) and QB-10 budget ledger enforced with the §3.1 per-step table.
 
