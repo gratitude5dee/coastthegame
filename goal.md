@@ -465,7 +465,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 ### M5 — Director mode & voice (target: 1.5 weeks)
 - [~] CameraRig CAM-3 (VR diorama) ✓, CAM-6 (shots, moves, lenses, follow / look at by direction) ✓, CAM-7 keyframed paths pending, CAM-8 role partition ✓ (tools per mode).
 - [~] Realtime voice via WebRTC with ephemeral secrets and VAD speech windows (DIR-1) — client + Worker built, live once the key lands; mode-gated tool schema (DIR-2) ✓; deixis resolver fixtures (SCH-6) — 17 cases today, ≥60 pending; ghost preview + undo ✓; `FakeRealtime` transcript replay in CI (DIR-6) ✓.
-- [ ] `docs/director-grammar.md` + a **nightly** e2e voice suite: 10 TTS-generated utterances against the real API → expected acts; ≥9/10.
+- [~] `docs/director-grammar.md` ✓ (the vocabulary as tables, mirrored by `tests/unit/grammar.test.ts`) + a **nightly** e2e voice suite: 10 TTS-generated utterances against the real API → expected acts; ≥9/10 — pending the key.
 - [ ] Astra planner (DIR-5): mission brief → shot list JSON; **12 missions authored by the planner and approved by GRATITUD3** (MIS-5).
 
 ### M6 — Studio & generative video (target: 1.5 weeks)

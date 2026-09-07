@@ -231,15 +231,19 @@ export class ActExecutor {
     return undefined;
   }
 
-  private ref(ref: ObjectRef, ctx: ResolveContext, bar = this.confirmBelow): { id?: string; result?: ActResult } {
-    if ('id' in ref && ref.id === 'me') return { id: 'me' };
+  private ref(
+    ref: ObjectRef,
+    ctx: ResolveContext,
+    bar = this.confirmBelow,
+  ): { id?: string; confidence?: number; candidates?: string[]; result?: ActResult } {
+    if ('id' in ref && ref.id === 'me') return { id: 'me', confidence: 1 };
     const r = resolveObject(ref, ctx);
     if (!r.value) return { result: { ok: false, affected: r.candidates, confidence: r.confidence, question: r.question ?? 'which?' } };
     if (r.confidence < bar) {
       this.ambiguity = { kind: 'object', objects: r.candidates, places: [] };
       return { result: { ok: false, affected: r.candidates, confidence: r.confidence, question: r.question ?? 'this one?' } };
     }
-    return { id: r.value };
+    return { id: r.value, confidence: r.confidence, candidates: r.candidates };
   }
 
   private run(act: SceneAct, ctx: ResolveContext): ActResult {
@@ -269,9 +273,15 @@ export class ActExecutor {
         return ops.rotate(o.id, act.yaw_deg, faceId) ? done(o.id) : NOT_HERE(`rotating ${o.id}`);
       }
       case 'scale': {
+        // Over 3× counts as destructive (DIR-3): it takes the delete bar. A `size_m` needs the object's radius first,
+        // so resolve with the plain bar and raise it once the factor is known.
         const o = this.ref(act.obj, ctx);
         if (!o.id) return o.result!;
         const factor = act.factor ?? (act.size_m ? act.size_m / Math.max(0.01, ops.radiusOf(o.id) * 2) : 1);
+        if (factor > 3 && o.id !== 'me' && (o.confidence ?? 1) < this.confirmDeleteBelow) {
+          this.ambiguity = { kind: 'object', objects: o.candidates ?? [o.id], places: [] };
+          return { ok: false, affected: o.candidates ?? [o.id], confidence: o.confidence ?? 1, question: 'this one?' };
+        }
         return ops.scale(o.id, factor) ? done(o.id) : NOT_HERE(`scaling ${o.id}`);
       }
       case 'delete': {

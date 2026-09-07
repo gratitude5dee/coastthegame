@@ -179,6 +179,21 @@ describe('ActExecutor', () => {
     expect(log).toEqual(['paint crate_2 red', 'remove crate_1', 'move crate_1 → -1.0,0.0,-4.0']); // next to = 1 m to the cone's right
   });
 
+  it('scaling past 3× is destructive: a merely likely object gets the delete bar and a question (DIR-3)', () => {
+    const { ops, log } = fakeScene();
+    const looked = new DeixisBuffer();
+    looked.push({ t: 2000, headHit: 'crate_1' }); // a head ray only: ~0.7 — enough to act, not enough to wreck
+    const ex = new ActExecutor(ops);
+    expect(say(ex, 'make that bigger', looked).results[0]).toMatchObject({ ok: true, affected: ['crate_1'] });
+    expect(say(ex, 'scale that 4x', looked).results[0]).toMatchObject({ ok: false, question: 'this one?', affected: ['crate_1'] });
+    expect(ex.hasPending).toBe(true);
+    expect(say(ex, 'yes').results[0]).toMatchObject({ ok: true, affected: ['crate_1'] });
+    expect(log.slice(-2)).toEqual(['scale crate_1 1.5', 'scale crate_1 4']);
+    const clicked = new DeixisBuffer();
+    clicked.push({ t: 2000, pointerHit: 'crate_2', clickEdge: true }); // a click: certain, no question
+    expect(say(ex, 'make that huge', clicked).results[0]).toMatchObject({ ok: true, affected: ['crate_2'] });
+  });
+
   it('a low-confidence place previews the move as a ghost until it is confirmed or something else is said', () => {
     const { ops, log } = fakeScene();
     // Only a head ray for "there" (0.72): fine for a relaxed set, a question for a strict one.
