@@ -115,6 +115,13 @@ export class NpcNav {
     return agent;
   }
 
+  /** Take an agent out of the crowd (its NPC left with its cell). */
+  removeAgent(agent: CrowdAgent) {
+    const i = this.agents.indexOf(agent);
+    if (i >= 0) this.agents.splice(i, 1);
+    this.crowd.removeAgent(agent);
+  }
+
   /** Ask an agent to walk to a world point (snapped to the navmesh). Returns false when unreachable. */
   moveTo(agent: CrowdAgent, target: THREE.Vector3): boolean {
     const p = this.snap(target, 3);

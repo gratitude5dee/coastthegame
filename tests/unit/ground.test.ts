@@ -89,5 +89,15 @@ describe('flattestSpot', () => {
     const spot = flattestSpot(grid, new THREE.Vector3(0, 0, 0), 4, 9, 2.5, 2.5);
     expect(spot.range).toBeLessThan(0.01);
     expect(spot.position.x).toBeGreaterThan(2); // on the flat side
+    // Keep-outs (people, props, the player) are walls to a car: a blocked centre is unscored, a ring finds a clear spot.
+    const blocked = flattestSpot(grid, new THREE.Vector3(6, 0, 0), 0, 0, 1.2, 2.4, 1, [{ x: 6.5, z: 1, r: 1.2 }]);
+    expect(blocked.range).toBe(Infinity);
+    expect(blocked.position.x).toBe(6);
+    const around = flattestSpot(grid, new THREE.Vector3(6, 0, 0), 1.5, 5, 1.2, 2.4, 16, [{ x: 6.5, z: 1, r: 1.2 }]);
+    expect(around.range).toBeLessThan(0.01);
+    expect(
+      Math.hypot(Math.max(0, Math.abs(6.5 - around.position.x) - 1.2), Math.max(0, Math.abs(1 - around.position.z) - 2.4)),
+    ).toBeGreaterThanOrEqual(1.2);
+    expect(flattestSpot(grid, new THREE.Vector3(6, 0, 0), 0, 0, 1.2, 2.4, 1, [{ x: 12, z: 12, r: 1 }]).range).toBe(0); // far away: clear
   });
 });

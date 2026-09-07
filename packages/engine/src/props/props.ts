@@ -239,8 +239,11 @@ export class PropSystem {
     if (throwVelocity) p.body.setLinvel({ x: throwVelocity.x, y: throwVelocity.y, z: throwVelocity.z }, true);
   }
 
+  /** A fresh id — never one a cell's authored content already uses (`crate_1` is the hub's crate). */
   nextId(prefix: string) {
-    return `${prefix}_${++this.counter}`;
+    let id = `${prefix}_${++this.counter}`;
+    while (this.props.has(id)) id = `${prefix}_${++this.counter}`;
+    return id;
   }
 
   private restOffset(p: Prop): THREE.Vector3 {

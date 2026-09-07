@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import type * as RAPIER_NS from '@dimforge/rapier3d-compat';
-import { NpcBrain, NpcNav, groundHeightAt, type GroundGrid, type PhysicsWorld } from '@coast/engine';
+import { NpcBrain, NpcNav, type PhysicsWorld } from '@coast/engine';
 import type { CrowdAgent } from 'recast-navigation';
 
 export interface NpcSpec {
@@ -40,6 +40,7 @@ export class NpcSystem {
   readonly npcs: Npc[] = [];
   private nav: NpcNav | null = null;
   private navFailed = false;
+  private navGen = 0;
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
   private readonly playerTuple: [number, number, number] = [0, 0, 0];
@@ -49,7 +50,8 @@ export class NpcSystem {
   constructor(
     private readonly physics: PhysicsWorld,
     private readonly world: THREE.Object3D,
-    private readonly ground: GroundGrid | null,
+    /** Ground height under a point — spans every resident cell and the roads between them (W-3). */
+    private readonly heightAt: ((x: number, z: number) => number) | null,
     private readonly events: NpcEvents = {},
     private readonly random: () => number = Math.random,
   ) {}
@@ -58,17 +60,32 @@ export class NpcSystem {
     return !!this.nav;
   }
 
-  /** Bake the navmesh from walkable meshes (async, WASM on demand) and put every NPC on it. */
+  /**
+   * Bake the navmesh from walkable meshes (async, WASM on demand) and put every NPC on it. Called again whenever a
+   * cell's ground comes or goes: the previous mesh keeps the crowd walking until the new one is ready, then the
+   * agents move over (a bake that an even newer one overtook is dropped).
+   */
   async buildNav(walkable: THREE.Mesh[], bounds?: [[number, number, number], [number, number, number]]) {
+    const gen = ++this.navGen;
     try {
       const nav = await NpcNav.build(walkable, { ...(bounds ? { bounds } : {}) }, 16);
+      if (gen !== this.navGen) {
+        nav.dispose();
+        return;
+      }
+      this.nav?.dispose();
       this.nav = nav;
       for (const n of this.npcs) n.agent = nav.addAgent(n.mesh.position, { maxSpeed: n.spec.speed ?? 1.4 });
       performance.mark('coast:navmesh');
     } catch (e) {
+      if (gen !== this.navGen) return;
       this.navFailed = true;
       console.warn('navmesh unavailable — NPCs will stand still', e);
     }
+  }
+
+  private groundY(pos: THREE.Vector3): number {
+    return this.heightAt ? this.heightAt(pos.x, pos.z) : pos.y;
   }
 
   spawn(spec: NpcSpec): Npc {
@@ -83,7 +100,7 @@ export class NpcSystem {
     mesh.add(body, head);
     mesh.name = spec.id;
     const pos = spec.home.clone();
-    if (this.ground) pos.y = groundHeightAt(this.ground, pos.x, pos.z);
+    pos.y = this.groundY(pos);
     mesh.position.copy(pos);
     this.world.add(mesh);
 
@@ -110,6 +127,19 @@ export class NpcSystem {
     return this.npcs.find((n) => n.spec.id === id);
   }
 
+  /** Take an NPC out of the world (its cell unloaded, W-3). Returns whether there was one. */
+  remove(id: string): boolean {
+    const i = this.npcs.findIndex((n) => n.spec.id === id);
+    if (i < 0) return false;
+    const n = this.npcs[i]!;
+    this.npcs.splice(i, 1);
+    this.world.remove(n.mesh);
+    this.physics.world.removeRigidBody(n.body);
+    if (n.agent && this.nav) this.nav.removeAgent(n.agent);
+    n.agent = null;
+    return true;
+  }
+
   /** The NPC nearest to `point` within `maxDist` metres (horizontal), or null. */
   nearest(point: THREE.Vector3, maxDist: number): Npc | null {
     let best: Npc | null = null;
@@ -132,7 +162,7 @@ export class NpcSystem {
   swapIdentity(npc: Npc, identity: NpcSpec, feet: THREE.Vector3, yaw: number): { spec: NpcSpec; position: THREE.Vector3; yaw: number } {
     const was = { spec: npc.spec, position: npc.mesh.position.clone(), yaw: npc.mesh.rotation.y };
     const pos = feet.clone();
-    if (this.ground) pos.y = groundHeightAt(this.ground, pos.x, pos.z);
+    pos.y = this.groundY(pos);
     npc.spec = { ...identity, home: pos.clone() };
     npc.capsule.material.color.setHex(identity.color);
     npc.mesh.position.copy(pos);

@@ -362,6 +362,10 @@ TypeScript sources of truth live next to the code (`packages/engine/src/world/ce
   "zones": [{ "id": "dj-booth", "kind": "poi", "aabb": [[-3, 0, -8], [3, 3, -4]] }],
   "transitions": [{ "to": "garage", "portal": [[-2, 0, 14], [2, 3, 15]], "streamAt_m": 15 }],
   "lighting": { "preset": "golden", "envmapFromPano": true },
+  // v0.2.1 (ADR-0011): what the cell contains — spawned with its ground, gone with its splats; positions in the cell frame, y = metres above the ground
+  "content": { "props": [{ "id": "crate_pier_1", "shape": "box", "size": [0.35, 0.35, 0.35], "color": 14251066, "mass": 3, "pos": [-1.2, 0.9, 8] }],
+               "npcs": [{ "id": "dockhand", "name": "Manny", "color": 14262330, "pos": [3, 0, 6], "lines": ["Tide's out."], "approaches": true }],
+               "vehicle": { "pos": [-3.5, 0, 9], "yaw": 0 } },
   "alignViews": [{ "id": "v1", "pos": [0, 1.6, 10], "lookAt": [0, 1, 0] } /* ×6 */],
   "budgetOverride": { "quest": { "lodSplatCount": 600000 } } }
 ```
@@ -451,7 +455,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 ### M2 — World v0: The Coast Block (target: 1 week) — **requires D-2 (Marble commercial terms) answered before spend**
 - [ ] Marble worlds generated for the hub + 4 cells from approved key art (+ text), exported (.spz 500k/full + collider + pano), orientation/scale fixed, `.rad` built, cells published to R2 with `cell.json` (SCH-1) + `level.json` (SCH-2); `docs/cells.md` lists costs.
 - [ ] Rapier trimesh from colliders; PHY-5 alignment ≤3% on every cell; spawn points and zones authored.
-- [~] Cell graph with streaming (W-3): walk from Garage → Pier → Alley without a loading screen; ≤2 cells resident — the streaming skeleton runs on the sample worlds (ADR-0009) until the Marble cells land.
+- [~] Cell graph with streaming (W-3): walk from Garage → Pier → Alley without a loading screen; ≤2 cells resident — the streaming skeleton runs on the sample worlds (ADR-0009) until the Marble cells land; **content follows the cell** ✓ (ADR-0011: SCH-1 `content` — props, NPCs, the car — spawned with a cell's ground and gone with its splats, the hub kit for a hub without a list, one NPC navmesh rebaked across the resident set, a cell's `lighting.preset` on arrival).
 - [~] Time-of-day presets (W-5) and fog modifier ✓ — golden / blue hour / night / fog noon (+ noon) as a grade: a dyno colour modifier on every splat (tint, saturation, lift, exp² fog), a sky dome (gradient, sun, stars), matching lights for the meshes and `scene.fog`; presets dissolve into each other; `set_time` / `set_weather` drive it; **post LUT ✓** (`packages/engine/src/render/post.ts` on `postprocessing`, ADR-0010: the mission's look as a baked 3D LUT + bloom for the neon + vignette / grain / aberration, live on desktop, through every cut export, on display-referred buffers so the splats blend as trained) — the pano env map pending; pano skybox loading choreography (UX-3) pending.
 - [ ] **Perf:** QB-1/2/3 met on desktop; Quest 3 and iPhone at least *render* the hub within budget (full gates at M3).
 

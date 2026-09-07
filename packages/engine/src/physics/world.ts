@@ -271,10 +271,18 @@ export function fenceWalls(rect: XZRect, openings: XZRect[] = [], t = 0.25): Fen
   return walls;
 }
 
+/** Somewhere a parked car must not land: a person, the player, a prop — a point and a keep-out radius (m). */
+export interface KeepOut {
+  x: number;
+  z: number;
+  r: number;
+}
+
 /**
  * Flattest spot on a ring around `center` (radii in m) for a footprint of `halfX` × `halfZ` m — where to park a car so
  * it does not spawn half-inside a hillside. Scores each candidate by the height range under the footprint (lower is
- * flatter); returns the best candidate and its score. Falls back to `center` when nothing is inside the grid.
+ * flatter); returns the best candidate and its score. Candidates whose footprint reaches into a keep-out circle are
+ * skipped (a kinematic NPC capsule is a wall to a car). Falls back to `center` when nothing is inside the grid.
  */
 export function flattestSpot(
   grid: GroundGrid,
@@ -284,10 +292,13 @@ export function flattestSpot(
   halfX = 2.5,
   halfZ = 2.5,
   angles = 16,
+  keepOut: KeepOut[] = [],
 ): { position: THREE.Vector3; range: number } {
   const maxX = grid.minX + (grid.cols - 1) * grid.cellSize;
   const maxZ = grid.minZ + (grid.rows - 1) * grid.cellSize;
   const inside = (x: number, z: number) => x >= grid.minX && x <= maxX && z >= grid.minZ && z <= maxZ;
+  const clear = (cx: number, cz: number) =>
+    keepOut.every((k) => Math.hypot(Math.max(0, Math.abs(k.x - cx) - halfX), Math.max(0, Math.abs(k.z - cz) - halfZ)) >= k.r);
   let best: { position: THREE.Vector3; range: number } | null = null;
   const step = Math.max(grid.cellSize, 0.5);
   for (let r = radiusMin; r <= radiusMax + 1e-6; r += Math.max(1, (radiusMax - radiusMin) / 3)) {
@@ -296,6 +307,7 @@ export function flattestSpot(
       const cx = center.x + Math.sin(t) * r;
       const cz = center.z + Math.cos(t) * r;
       if (!inside(cx - halfX, cz - halfZ) || !inside(cx + halfX, cz + halfZ)) continue;
+      if (!clear(cx, cz)) continue;
       let lo = Infinity;
       let hi = -Infinity;
       for (let x = cx - halfX; x <= cx + halfX + 1e-6; x += step) {
@@ -309,7 +321,8 @@ export function flattestSpot(
       if (!best || range < best.range) best = { position: new THREE.Vector3(cx, groundHeightAt(grid, cx, cz), cz), range };
     }
   }
-  return best ?? { position: new THREE.Vector3(center.x, groundHeightAt(grid, center.x, center.z), center.z), range: 0 };
+  // Nothing fits (off the grid, or everything in a keep-out): the centre itself, marked as unscored.
+  return best ?? { position: new THREE.Vector3(center.x, groundHeightAt(grid, center.x, center.z), center.z), range: Infinity };
 }
 
 /** Bilinear height lookup on a ground grid (world XZ → Y), clamped to the grid. */

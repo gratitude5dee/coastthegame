@@ -40,6 +40,7 @@ import {
   cutGroundForCorridor,
   fenceRect,
   type Cell,
+  type CellContent,
   type GroundGrid,
   type Portal,
   type StreamEvent,
@@ -79,6 +80,7 @@ import {
   LOCAL_BUTTERFLY,
   SCENES,
   SCENE_ORDER,
+  hubKit,
   levelForScene,
   soloLevel,
   worldDef,
@@ -100,7 +102,11 @@ interface ResidentCell {
   groundMesh: THREE.Mesh | null;
   colliderMeshes: THREE.Object3D[];
   cell?: Cell;
+  /** What this cell put into the world (W-3 "content follows the cell", ADR-0011) — taken out again when it unloads. */
+  content: { props: string[]; npcs: string[]; vehicle: boolean; spawned: boolean };
 }
+
+const noContent = () => ({ props: [], npcs: [], vehicle: false, spawned: false });
 
 const RIG_ORDER: RigMode[] = ['actor', 'director', 'producer'];
 const EYE_HEIGHT = 1.62;
@@ -192,6 +198,9 @@ declare global {
       corridors: number;
       /** Road ends walled off because the cell there has no ground (yet, or any more). */
       gates: number;
+      /** What each resident cell has put into the world (props / NPCs / the car), and every prop id there is. */
+      content: Record<string, { props: number; npcs: number; vehicle: boolean }>;
+      props: string[];
     };
     __coastGround?: {
       minX: number;
@@ -254,6 +263,10 @@ export class Game {
   private loading = '';
   private usingFallback = false;
   private timePreset: TimeOfDay = 'noon';
+  /** The player (T) or the director (`set_time`) picked the time: cells stop applying their own lighting preset. */
+  private timeByUser = false;
+  /** A cell's ground came or went: the NPC navmesh is rebuilt on the next frame (spans every resident cell + the roads). */
+  private navDirty = false;
   /** The look on the picture (MIS-6): the mission's at the brief, the director's after "make it noir". */
   private lookName = 'clean';
   /** The post stack (W-5 post LUT): live on tiers budgeted 'full'; every tier borrows one for the cut export. */
@@ -380,6 +393,7 @@ export class Game {
     const timeParam = params.get('time');
     if (timeParam && (TIME_ORDER as string[]).includes(timeParam)) {
       this.timePreset = timeParam as TimeOfDay;
+      this.timeByUser = true;
       this.atmosphere.setTime(this.timePreset, true);
     }
     // The post stack (W-5 post LUT, MIS-6 looks, AF-7 `postprocessing`): bloom for the neon, the look's 3D LUT,
@@ -742,6 +756,7 @@ export class Game {
       colliders: [],
       groundMesh: null,
       colliderMeshes: [],
+      content: noContent(),
       ...(cell ? { cell } : {}),
     };
     this.cells.set(id, resident);
@@ -753,6 +768,7 @@ export class Game {
     const c = this.cells.get(id);
     if (!c) return;
     this.cells.delete(id);
+    this.despawnCellContent(c);
     this.world.remove(c.mesh);
     c.mesh.dispose();
     if (this.physics && c.colliders.length) this.physics.removeColliders(c.colliders);
@@ -812,8 +828,142 @@ export class Game {
     this.buildCellGround(c, physics);
     this.streamer?.markLoaded(c.id);
     this.syncGates();
+    this.spawnCellContent(c);
     this.subtitles?.say('Set', `${c.def.title} is in`, 2500);
     return true;
+  }
+
+  // ── Content follows the cell (W-3, ADR-0011) ─────────────────────────────────────────────────────────────────
+
+  /** The content a cell hosts: its own, or the hub kit for the level's hub without any (spawn-relative). */
+  private contentFor(c: ResidentCell): CellContent | null {
+    if (c.def.content) return c.def.content;
+    if (c.id === this.levelDef.level.hub)
+      return hubKit(c.def.spawn ? [c.def.spawn[0] - (c.def.origin?.[0] ?? 0), 0, c.def.spawn[2] - (c.def.origin?.[2] ?? 0)] : [0, 0, 0]);
+    return null;
+  }
+
+  /**
+   * Put a cell's props, NPCs and car into the world once its ground is in the physics world. Positions are in the
+   * cell's frame with `y` metres above the derived ground. Anything already there (carried over from a previous
+   * visit, or held) is left alone.
+   */
+  private spawnCellContent(c: ResidentCell) {
+    const physics = this.physics;
+    const props = this.props;
+    const npcs = this.npcs;
+    if (c.content.spawned || !physics || !props || !npcs || !(c.ground || c.colliders.length)) return;
+    c.content.spawned = true;
+    const content = this.contentFor(c);
+    if (!content) return;
+    const o = c.def.origin ?? [0, 0, 0];
+    for (const p of content.props ?? []) {
+      if (props.props.has(p.id)) continue;
+      const pos = new THREE.Vector3(o[0] + p.pos[0], 0, o[2] + p.pos[2]);
+      pos.y = this.heightAt(pos.x, pos.z) + p.pos[1];
+      props.spawn({ id: p.id, shape: p.shape, size: p.size, color: p.color, mass: p.mass, ...(p.tags ? { tags: p.tags } : {}) }, pos);
+      c.content.props.push(p.id);
+    }
+    for (const n of content.npcs ?? []) {
+      if (npcs.byId(n.id) || n.id === this.identity.id) continue; // the player wears this identity right now (ACT-3)
+      const home = new THREE.Vector3(o[0] + n.pos[0], o[1] + n.pos[1], o[2] + n.pos[2]);
+      npcs.spawn({
+        id: n.id,
+        name: n.name,
+        color: n.color,
+        home,
+        lines: n.lines,
+        ...(n.approaches !== undefined ? { approaches: n.approaches } : {}),
+        ...(n.speed !== undefined ? { speed: n.speed } : {}),
+      });
+      this.looks.set(n.id, { color: n.color, name: n.name });
+      c.content.npcs.push(n.id);
+    }
+    if (content.vehicle && !this.vehicle) {
+      // Parked on the flattest patch around the authored spot so it never spawns half inside a hillside (which
+      // launches it); it drops onto its suspension.
+      const v = content.vehicle;
+      const carPos = new THREE.Vector3(o[0] + v.pos[0], 0, o[2] + v.pos[2]);
+      if (c.ground) {
+        // Never on top of a person (a kinematic capsule is a wall to the car), the player or a prop.
+        const keepOut = [
+          ...npcs.npcs.map((n) => ({ x: n.mesh.position.x, z: n.mesh.position.z, r: 1.2 })),
+          ...[...props.props.values()].map((p) => ({ x: p.mesh.position.x, z: p.mesh.position.z, r: 0.8 })),
+        ];
+        const feet = this.character?.feet(this.tmpV);
+        if (feet) keepOut.push({ x: feet.x, z: feet.z, r: 1.5 });
+        const here = flattestSpot(c.ground, carPos, 0, 0, 1.2, 2.4, 1, keepOut); // the authored spot, if flat and clear
+        carPos.copy(here.range < 0.6 ? here.position : flattestSpot(c.ground, carPos, 1.5, 5, 1.2, 2.4, 16, keepOut).position);
+      } else carPos.y = this.heightAt(carPos.x, carPos.z);
+      carPos.y += 1.2;
+      const yaw = c.def.content ? v.yaw : this.rig.yaw; // the kit's car faces the way the player does
+      this.vehicle = new Lowrider(physics, { position: carPos, yaw });
+      this.vehicleSpawn = { pos: carPos.clone(), yaw };
+      this.world.add(this.vehicle.group);
+      this.sfx.engineStart(this.vehicle.group); // idles by the door (no-op until audio unlocks; retried per frame)
+      c.content.vehicle = true;
+    }
+    this.navDirty = true;
+    this.syncNpcHook();
+  }
+
+  /** Take a cell's content out with it — except what the player is holding or driving, which follows the player. */
+  private despawnCellContent(c: ResidentCell) {
+    const props = this.props;
+    for (const id of c.content.props) {
+      const p = props?.props.get(id);
+      if (!p || props!.grabbed === p) continue;
+      props!.remove(id);
+    }
+    for (const id of c.content.npcs) this.npcs?.remove(id);
+    if (c.content.vehicle && this.vehicle && !this.driving) {
+      this.sfx.engineStop();
+      this.world.remove(this.vehicle.group);
+      this.vehicle.dispose();
+      this.vehicle = null;
+      this.vehicleSpawn = null;
+    }
+    c.content = noContent();
+    this.navDirty = true;
+    this.syncNpcHook();
+  }
+
+  /**
+   * The NPC navmesh spans every resident cell's walkable surface (its collider GLB, else its derived ground) and the
+   * roads between them; rebuilt (async) whenever ground comes or goes — the crowd keeps walking on the old one meanwhile.
+   */
+  private rebuildNav() {
+    const npcs = this.npcs;
+    if (!npcs) return;
+    const walkable: THREE.Mesh[] = [];
+    let minX = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxZ = -Infinity;
+    for (const c of this.cells.values()) {
+      if (!c.ground) continue;
+      for (const m of c.colliderMeshes) m.traverse((o) => ((o as THREE.Mesh).isMesh ? walkable.push(o as THREE.Mesh) : null));
+      if (!c.colliderMeshes.length && c.groundMesh) walkable.push(c.groundMesh);
+      const cov = c.ground.coverage;
+      if (cov) {
+        minX = Math.min(minX, cov.minX);
+        minZ = Math.min(minZ, cov.minZ);
+        maxX = Math.max(maxX, cov.maxX);
+        maxZ = Math.max(maxZ, cov.maxZ);
+      }
+    }
+    for (const road of this.corridors.values()) walkable.push(road.road);
+    if (!walkable.length) return;
+    const bounds: [[number, number, number], [number, number, number]] | undefined = Number.isFinite(minX)
+      ? [
+          [minX - 1, -50, minZ - 1],
+          [maxX + 1, 80, maxZ + 1],
+        ]
+      : undefined;
+    const gen = this.physicsGen;
+    void npcs.buildNav(walkable, bounds).then(() => {
+      if (gen === this.physicsGen) this.syncNpcHook();
+    });
   }
 
   // ── Streaming (W-3) ───────────────────────────────────────────────────────────────────────────────────────────
@@ -926,6 +1076,7 @@ export class Game {
     );
     c.groundMesh.visible = this.debug;
     this.world.add(c.groundMesh);
+    this.navDirty = true;
   }
 
   /** Per frame: feed the player's position to the streamer and act on what it decides. */
@@ -964,8 +1115,17 @@ export class Game {
     this.currentSceneId = id;
     this.sceneDef = c.def;
     this.perf.setCell(id);
+    this.applyCellLighting(c);
     this.subtitles?.say('Set', `${c.def.title}`, 3000);
     this.updateHint();
+  }
+
+  /** A cell arrives under its own grade (SCH-1 `lighting.preset`) — unless the player or the director picked a time. */
+  private applyCellLighting(c: ResidentCell) {
+    const preset = c.def.lighting ?? (c.cell?.lighting.preset as TimeOfDay | undefined);
+    if (!preset || this.timeByUser || preset === this.timePreset) return;
+    this.timePreset = preset;
+    this.recolorWorld(preset);
   }
 
   private syncCellsHook() {
@@ -979,6 +1139,13 @@ export class Game {
       nearest: nearest ? { to: nearest.portal.to, distance: Math.round(nearest.distance * 10) / 10 } : null,
       corridors: this.corridors.size,
       gates: [...this.corridors.values()].reduce((n, r) => n + (r.gateClosed('a') ? 1 : 0) + (r.gateClosed('b') ? 1 : 0), 0),
+      content: Object.fromEntries(
+        [...this.cells.values()].map((c) => [
+          c.id,
+          { props: c.content.props.length, npcs: c.content.npcs.length, vehicle: c.content.vehicle },
+        ]),
+      ),
+      props: [...(this.props?.props.keys() ?? [])],
     };
   }
 
@@ -1031,59 +1198,20 @@ export class Game {
     const feet = new THREE.Vector3(spawnXZ.x, spawnY + 0.3, spawnXZ.z);
     this.character = new CharacterController(physics, { start: feet, yaw: this.rig.yaw });
 
-    // A few props to grab, throw and "put there" (PHY-2). GLB props arrive with M4.
-    const props = new PropSystem(physics, this.world);
-    this.props = props;
+    // Props, NPCs and the car are the cell's content (W-3, ADR-0011): the hub kit for a hub without its own list.
+    // Systems first (the studio needs the NPC crowd), then the content, then whatever `?grab=` / `?vehicle=` ask for.
+    this.props = new PropSystem(physics, this.world);
     const f = this.rig.forwardXZ(new THREE.Vector3());
     const right = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0));
-    const at = (fwd: number, side: number, h: number) =>
-      feet
-        .clone()
-        .addScaledVector(f, fwd)
-        .addScaledVector(right, side)
-        .add(new THREE.Vector3(0, h + 0.6, 0));
-    props.spawn(
-      { id: props.nextId('crate'), shape: 'box', size: [0.35, 0.35, 0.35], color: 0xd9743a, mass: 3 },
-      at(2.5, -1.2, this.groundDelta(feet, f, 2.5, right, -1.2)),
-    );
-    props.spawn(
-      { id: props.nextId('crate'), shape: 'box', size: [0.25, 0.25, 0.25], color: 0x4fa3d9, mass: 2 },
-      at(3.2, 0.6, this.groundDelta(feet, f, 3.2, right, 0.6)),
-    );
-    // Spray cans (W-4): grab one, then click / pull the trigger at the splats to tag them in the can's colour.
-    props.spawn(
-      { id: props.nextId('can'), shape: 'cylinder', size: [0.12, 0.2], color: 0xff3fa4, mass: 0.6, tags: ['spray'] },
-      at(2.0, 1.4, this.groundDelta(feet, f, 2.0, right, 1.4)),
-    );
-    props.spawn(
-      { id: props.nextId('can'), shape: 'cylinder', size: [0.12, 0.2], color: 0x3fd0ff, mass: 0.6, tags: ['spray'] },
-      at(1.6, 1.9, this.groundDelta(feet, f, 1.6, right, 1.9)),
-    );
-    props.spawn(
-      { id: props.nextId('ball'), shape: 'ball', size: [0.3], color: 0x9be34a, mass: 1.5 },
-      at(4.5, -0.3, this.groundDelta(feet, f, 4.5, right, -0.3)),
-    );
+    this.setupStudio(feet, f, right);
+    this.spawnCellContent(resident);
+    this.applyCellLighting(resident);
 
     const grabParam = this.opts.params.get('grab');
     if (grabParam) {
-      const target = props.props.get(grabParam);
-      if (target) props.grab(target); // QA: start holding a prop (e.g. grab=can_3 for the spray test)
+      const target = this.props.props.get(grabParam);
+      if (target) this.props.grab(target); // QA: start holding a prop (e.g. grab=can_3 for the spray test)
     }
-
-    // The lowrider idles nearby, facing the same way (PHY-3), parked on the flattest patch within a few metres so it
-    // never spawns half inside a hillside (which launches it). It drops onto its suspension.
-    const carPos = feet.clone().addScaledVector(f, 5).addScaledVector(right, -3.5);
-    if (this.ground) {
-      const spot = flattestSpot(this.ground, feet, 4, 9, 2.6, 2.6);
-      carPos.copy(spot.position);
-      carPos.y += 1.2;
-    } else carPos.y = feet.y + 1.0;
-    this.vehicle = new Lowrider(physics, { position: carPos, yaw: this.rig.yaw });
-    this.vehicleSpawn = { pos: carPos.clone(), yaw: this.rig.yaw };
-    this.world.add(this.vehicle.group);
-    this.sfx.engineStart(this.vehicle.group); // idles by the door (no-op until audio unlocks; retried per frame)
-
-    this.setupStudio(feet, f, right);
 
     // The beat grid starts with the world (the track player lands with AUD-2); `?beat=1` = hop on the beat from the start.
     this.beat.start(performance.now());
@@ -1293,11 +1421,11 @@ export class Game {
     return this.vehicle!.position(out).sub(this.tmpV2.set(0, CAR_FEET_DROP, 0));
   }
 
-  /** The Photographer (tutor) + extras on a runtime navmesh, the billboard, and the studio session (goal.md §3.1 steps 2, 5). */
+  /** The NPC crowd (the cells put their people on it), the billboard, and the studio session (goal.md §3.1 steps 2, 5). */
   private setupStudio(feet: THREE.Vector3, f: THREE.Vector3, right: THREE.Vector3) {
     const physics = this.physics!;
     this.subtitles ??= createSubtitles(document.body);
-    const npcs = new NpcSystem(physics, this.world, this.ground, {
+    const npcs = new NpcSystem(physics, this.world, (x, z) => this.heightAt(x, z), {
       onGreet: (npc, line) => {
         this.subtitles?.say(npc.spec.name, line);
         this.tts.say(npc.spec.id, line);
@@ -1310,40 +1438,7 @@ export class Game {
       },
     });
     this.npcs = npcs;
-    const at = (fwd: number, side: number) => feet.clone().addScaledVector(f, fwd).addScaledVector(right, side);
     this.looks.set(PLAYER_IDENTITY.id, { color: PLAYER_IDENTITY.color, name: PLAYER_IDENTITY.name });
-    npcs.spawn({
-      id: 'photographer',
-      name: 'Photographer',
-      color: 0x4fa3d9,
-      home: at(4, 1.6),
-      approaches: true,
-      speed: 1.5,
-      lines: [
-        'Say: camera low, follow me.',
-        'Roll it — Enter is action. Get low, keep the crate in frame.',
-        'Golden hour is on T. Sunset sells.',
-      ],
-    });
-    npcs.spawn({ id: 'npc_a', name: 'Rico', color: 0xd9a03a, home: at(9, -5), lines: ['Yo $COAST!', 'Nice ride.'] });
-    npcs.spawn({ id: 'npc_b', name: 'Mari', color: 0xb35cd9, home: at(-3, 6), lines: ['Tag that wall.', 'Hop it on the one.'] });
-    npcs.spawn({ id: 'npc_c', name: 'Dee', color: 0x3ad98a, home: at(7, 7), lines: ['Low and slow.', 'That your cut on the billboard?'] });
-    for (const n of npcs.npcs) this.looks.set(n.spec.id, { color: n.spec.color, name: n.spec.name });
-    // Navmesh: the cell collider when there is one, else the splat-derived ground grid (bounded to the scan coverage).
-    const walkable: THREE.Mesh[] = [];
-    for (const m of this.colliderMeshes) m.traverse((o) => ((o as THREE.Mesh).isMesh ? walkable.push(o as THREE.Mesh) : null));
-    if (!walkable.length && this.groundMesh) walkable.push(this.groundMesh);
-    const c = this.ground?.coverage;
-    const bounds: [[number, number, number], [number, number, number]] | undefined = c
-      ? [
-          [c.minX, -50, c.minZ],
-          [c.maxX, 80, c.maxZ],
-        ]
-      : undefined;
-    const gen = this.physicsGen;
-    void npcs.buildNav(walkable, bounds).then(() => {
-      if (gen === this.physicsGen) this.syncNpcHook();
-    });
     this.syncNpcHook();
 
     // Billboard: "your cut plays here" until a take exists, then the recorded clip (VideoTexture).
@@ -1493,12 +1588,6 @@ export class Game {
   }
 
   /** Ground height difference between the spawn and a point offset from it (so props start above the terrain). */
-  private groundDelta(feet: THREE.Vector3, f: THREE.Vector3, fwd: number, right: THREE.Vector3, side: number): number {
-    if (!this.ground) return 0;
-    const p = feet.clone().addScaledVector(f, fwd).addScaledVector(right, side);
-    return this.heightAt(p.x, p.z) - feet.y + 0.3;
-  }
-
   // ── Frame ─────────────────────────────────────────────────────────────────────────────────────────────────
 
   private tick(time: number) {
@@ -1592,6 +1681,7 @@ export class Game {
     }
     if (i.timeCycle) {
       this.timePreset = TIME_ORDER[(TIME_ORDER.indexOf(this.timePreset) + 1) % TIME_ORDER.length]!;
+      this.timeByUser = true;
       this.recolorWorld();
     }
     if (i.modeCycle) {
@@ -1836,6 +1926,10 @@ export class Game {
     }
     if (this.rig.mode === 'actor' && !driving && !this.inXr) ch.yaw = this.rig.yaw;
     this.updateStreaming(driving ? this.carFeet(this.tmpV) : ch.feet(this.tmpV));
+    if (this.navDirty) {
+      this.navDirty = false;
+      this.rebuildNav();
+    }
     this.props?.sync(physics.alpha);
     this.vehicle?.sync(physics.alpha);
     if (this.vehicle) {
@@ -1848,7 +1942,7 @@ export class Game {
         wheels: this.vehicle.wheelsOnGround,
         autoHop: this.autoHop,
       };
-    }
+    } else if (window.__coastVehicle) window.__coastVehicle = undefined;
     // Fell through the world? Respawn on the ground (directly — an input edge set here would be cleared before it is read).
     const fell =
       (driving ? this.vehicle!.position(this.tmpV) : ch.feet(this.tmpV)).y < -40 || (this.vehicle?.position(this.tmpV2).y ?? 0) < -40;
@@ -2480,6 +2574,7 @@ export class Game {
       setTime: (preset) => {
         if (!(TIME_ORDER as string[]).includes(preset)) return false;
         this.timePreset = preset as TimeOfDay;
+        this.timeByUser = true;
         this.recolorWorld(this.timePreset);
         return true;
       },

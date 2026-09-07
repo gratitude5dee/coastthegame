@@ -9,7 +9,7 @@
  * doorways are as wide as the road plus its kerbs (8 m), so nobody walks past one along the edge.
  */
 import { SplatFileType } from '@sparkjsdev/spark';
-import type { CellTransition, Level, Vec3 } from '@coast/engine';
+import type { CellContent, CellTransition, Level, TimeOfDay, Vec3 } from '@coast/engine';
 
 export interface SceneDef {
   title: string;
@@ -28,6 +28,10 @@ export interface SceneDef {
   lod?: boolean;
   /** Doorways to neighbouring cells, in this cell's frame (SCH-1). */
   transitions?: CellTransition[];
+  /** Props / NPCs / the car this cell hosts, in its frame (SCH-1 `content`, ADR-0011); the level's hub gets the kit when absent. */
+  content?: CellContent;
+  /** The grade the cell arrives under (SCH-1 `lighting.preset`) unless the player or the director picked a time. */
+  lighting?: TimeOfDay;
   /** World position of the cell's frame (set from the level's placements). */
   origin?: Vec3;
 }
@@ -35,6 +39,45 @@ export interface SceneDef {
 export interface LevelDef {
   level: Level;
   cells: Record<string, SceneDef>;
+}
+
+/**
+ * The hub kit: what the level's hub puts down when it has no authored content — two crates, two spray cans, a ball,
+ * the lowrider, the Photographer and three extras (goal.md §3.1 steps 2–3; PHY-2/3/4), laid out around the spawn
+ * for a camera that looks down −Z (every sample world's does). Props sit 0.9 m up and drop onto the ground.
+ */
+export function hubKit(spawn: Vec3): CellContent {
+  const at = (side: number, fwd: number, up = 0): Vec3 => [spawn[0] + side, up, spawn[2] - fwd];
+  return {
+    props: [
+      { id: 'crate_1', shape: 'box', size: [0.35, 0.35, 0.35], color: 0xd9743a, mass: 3, pos: at(-1.2, 2.5, 0.9) },
+      { id: 'crate_2', shape: 'box', size: [0.25, 0.25, 0.25], color: 0x4fa3d9, mass: 2, pos: at(0.6, 3.2, 0.9) },
+      // Spray cans (W-4): grab one, then click / pull the trigger at the splats to tag them in the can's colour.
+      { id: 'can_3', shape: 'cylinder', size: [0.12, 0.2], color: 0xff3fa4, mass: 0.6, pos: at(1.4, 2.0, 0.9), tags: ['spray'] },
+      { id: 'can_4', shape: 'cylinder', size: [0.12, 0.2], color: 0x3fd0ff, mass: 0.6, pos: at(1.9, 1.6, 0.9), tags: ['spray'] },
+      { id: 'ball_5', shape: 'ball', size: [0.3], color: 0x9be34a, mass: 1.5, pos: at(-0.3, 4.5, 0.9) },
+    ],
+    npcs: [
+      {
+        id: 'photographer',
+        name: 'Photographer',
+        color: 0x4fa3d9,
+        pos: at(1.6, 4),
+        approaches: true,
+        speed: 1.5,
+        lines: [
+          'Say: camera low, follow me.',
+          'Roll it — Enter is action. Get low, keep the crate in frame.',
+          'Golden hour is on T. Sunset sells.',
+        ],
+      },
+      { id: 'npc_a', name: 'Rico', color: 0xd9a03a, pos: at(-5, 9), lines: ['Yo $COAST!', 'Nice ride.'] },
+      { id: 'npc_b', name: 'Mari', color: 0xb35cd9, pos: at(6, -3), lines: ['Tag that wall.', 'Hop it on the one.'] },
+      { id: 'npc_c', name: 'Dee', color: 0x3ad98a, pos: at(7, 7), lines: ['Low and slow.', 'That your cut on the billboard?'] },
+    ],
+    // The lowrider idles nearby, facing the same way (PHY-3); the game parks it on the flattest patch around here.
+    vehicle: { pos: at(-3.5, 5), yaw: 0 },
+  };
 }
 
 export const LOCAL_BUTTERFLY: SceneDef = {
@@ -82,6 +125,30 @@ export const SCENES: Record<string, SceneDef> = {
     camera: { pos: [0, 1.6, 2], lookAt: [0, 1.4, -5] },
     world: true,
     spawn: [0, 0, 1],
+    lighting: 'blue', // a snowy street at blue hour
+    content: {
+      props: [
+        { id: 'cone_street', shape: 'cylinder', size: [0.22, 0.6], color: 0xff7a1a, mass: 1, pos: [-2.5, 0.9, -3] },
+        { id: 'crate_street', shape: 'box', size: [0.4, 0.4, 0.4], color: 0x7a5230, mass: 4, pos: [3, 0.9, -1] },
+      ],
+      npcs: [
+        {
+          id: 'nova',
+          name: 'Nova',
+          color: 0xe8e4ff,
+          pos: [-3, 0, -7],
+          lines: ['Snow on the block tonight.', 'The valley is back up the hill.'],
+        },
+        {
+          id: 'kai',
+          name: 'Kai',
+          color: 0xffb54a,
+          pos: [5, 0, 1],
+          approaches: true,
+          lines: ['Downhill takes you to the tower.', 'Blue hour. Perfect.'],
+        },
+      ],
+    },
     transitions: [
       {
         to: 'valley',
@@ -110,6 +177,19 @@ export const SCENES: Record<string, SceneDef> = {
     camera: { pos: [0, 1.5, 4], lookAt: [0, 1.5, 0] },
     world: true,
     spawn: [0, 0, 3],
+    lighting: 'fog_noon', // the tower in the fog
+    content: {
+      props: [{ id: 'ball_sutro', shape: 'ball', size: [0.3], color: 0xff3fa4, mass: 1.5, pos: [-2, 0.9, 0] }],
+      npcs: [
+        {
+          id: 'sky',
+          name: 'Sky',
+          color: 0x9be34a,
+          pos: [3, 0, -3],
+          lines: ['Fog rolls in from the ocean side.', 'You can see the whole city on a clear day.'],
+        },
+      ],
+    },
     // A wide, low hilltop: −0.2 at the centre, −1.5 at the edges.
     transitions: [
       {
@@ -147,12 +227,13 @@ export const STRIP: LevelDef = {
 };
 
 /** Three butterflies 16 m apart on 4 m roads (local data, no LoD to speak of) — the streaming test bed. */
-const runCell = (title: string, west: string | null, east: string | null): SceneDef => ({
+const runCell = (title: string, west: string | null, east: string | null, content?: CellContent): SceneDef => ({
   ...LOCAL_BUTTERFLY,
   title,
   world: true,
   spawn: [0, 0, 0],
   groundHalfExtent: 7,
+  ...(content ? { content } : {}),
   transitions: [
     ...(west
       ? [
@@ -193,9 +274,15 @@ export const RUN: LevelDef = {
     placements: { butterfly: { origin: [0, 0, 0] }, 'butterfly-2': { origin: [16, 0, 0] }, 'butterfly-3': { origin: [32, 0, 0] } },
   },
   cells: {
-    butterfly: runCell('Butterfly (run: 1 of 3)', null, 'butterfly-2'),
-    'butterfly-2': runCell('Butterfly (run: 2 of 3)', 'butterfly', 'butterfly-3'),
-    'butterfly-3': runCell('Butterfly (run: 3 of 3)', 'butterfly-2', null),
+    butterfly: runCell('Butterfly (run: 1 of 3)', null, 'butterfly-2'), // the hub: the kit
+    'butterfly-2': runCell('Butterfly (run: 2 of 3)', 'butterfly', 'butterfly-3', {
+      props: [{ id: 'cone_2', shape: 'cylinder', size: [0.22, 0.6], color: 0xff7a1a, mass: 1, pos: [-2, 0.9, 2] }],
+      npcs: [{ id: 'nova', name: 'Nova', color: 0xe8e4ff, pos: [2, 0, -3], lines: ['Second stop.'] }],
+    }),
+    'butterfly-3': runCell('Butterfly (run: 3 of 3)', 'butterfly-2', null, {
+      props: [{ id: 'ball_3', shape: 'ball', size: [0.3], color: 0xff3fa4, mass: 1.5, pos: [2, 0.9, 2] }],
+      npcs: [{ id: 'kai', name: 'Kai', color: 0xffb54a, pos: [-2, 0, -3], lines: ['End of the run.'] }],
+    }),
   },
 };
 
