@@ -5,7 +5,8 @@
  *  - `strip` — valley ↔ snow street ↔ sutro over the network: the default when `?scene=valley|street|sutro`.
  *  - `run`   — three copies of the local butterfly sample 16 m apart: the e2e harness and offline QA (`?level=run`).
  *
- * Doorway floors were measured from the derived ground grids (`docs/cells.md` will carry the Marble cells' data).
+ * Doorway floors were measured from the derived ground grids (`docs/cells.md` will carry the Marble cells' data);
+ * doorways are as wide as the road plus its kerbs (8 m), so nobody walks past one along the edge.
  */
 import { SplatFileType } from '@sparkjsdev/spark';
 import type { CellTransition, Level, Vec3 } from '@coast/engine';
@@ -61,8 +62,8 @@ export const SCENES: Record<string, SceneDef> = {
       {
         to: 'street',
         portal: [
-          [2, -0.6, 27],
-          [6, 2.4, 29],
+          [0, -0.6, 27],
+          [8, 2.4, 29],
         ],
         streamAt_m: 15,
       },
@@ -85,16 +86,16 @@ export const SCENES: Record<string, SceneDef> = {
       {
         to: 'valley',
         portal: [
-          [0, 2.5, -25],
-          [4, 5.5, -23],
+          [-2, 2.5, -25],
+          [6, 5.5, -23],
         ],
         streamAt_m: 15,
       }, // the uphill end
       {
         to: 'sutro',
         portal: [
-          [-2, -0.1, 7],
-          [2, 2.9, 9],
+          [-4, -0.1, 7],
+          [4, 2.9, 9],
         ],
         streamAt_m: 15,
       }, // the downhill end
@@ -114,8 +115,8 @@ export const SCENES: Record<string, SceneDef> = {
       {
         to: 'street',
         portal: [
-          [-2, -1.4, -26],
-          [2, 1.6, -24],
+          [-4, -1.4, -26],
+          [4, 1.6, -24],
         ],
         streamAt_m: 15,
       },
@@ -158,8 +159,8 @@ const runCell = (title: string, west: string | null, east: string | null): Scene
           {
             to: west,
             portal: [
-              [-7, 0, -2],
-              [-5, 3, 2],
+              [-7, 0, -4],
+              [-5, 3, 4],
             ] as CellTransition['portal'],
             streamAt_m: 4,
           },
@@ -170,8 +171,8 @@ const runCell = (title: string, west: string | null, east: string | null): Scene
           {
             to: east,
             portal: [
-              [5, 0, -2],
-              [7, 3, 2],
+              [5, 0, -4],
+              [7, 3, 4],
             ] as CellTransition['portal'],
             streamAt_m: 4,
           },

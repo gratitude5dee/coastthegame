@@ -38,6 +38,16 @@ export function countSplats(splat: SplatMesh): number {
   return n;
 }
 
+/**
+ * Whether the estimator would see any splats right now — cheap (no iteration). With `lod: true`, `onLoad` can fire
+ * before the LoD tree exists and the base set reads 0 until the data moves into `lodSplats`; a ground derived in
+ * that window is empty, so callers wait for this (W-3 streamed cells, scene switches with Rapier already loaded).
+ */
+export function splatsReady(splat: SplatMesh): boolean {
+  const src = splatSource(splat) as { numSplats?: number };
+  return (src.numSplats ?? 0) > 0;
+}
+
 export function groundFromSplats(splat: SplatMesh, opts: GroundOptions = {}): GroundGrid {
   const halfExtent = opts.halfExtent ?? 24;
   const cellSize = opts.cellSize ?? 0.75;

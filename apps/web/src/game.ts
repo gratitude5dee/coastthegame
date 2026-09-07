@@ -21,6 +21,7 @@ import {
   framePositionForHead,
   groundFromSplats,
   groundHeightAt,
+  splatsReady,
   liftFromAxes,
   loadRapier,
   snapTurnShift,
@@ -737,14 +738,24 @@ export class Game {
   private onCellLoaded(resident: ResidentCell) {
     if (!this.cells.has(resident.id)) return; // unloaded while downloading
     resident.loaded = true;
-    if (this.physics && this.physicsReady) {
-      this.ensureCorridors();
-      this.buildCellGround(resident, this.physics);
-      this.streamer?.markLoaded(resident.id);
-      this.syncGates();
-    }
-    this.subtitles?.say('Set', `${resident.def.title} is in`, 2500);
+    this.tryBuildGround(resident);
     this.syncCellsHook();
+  }
+
+  /**
+   * Ground for a loaded cell once its splats are readable (with LoD, `onLoad` can precede the LoD tree — the frame
+   * loop retries until the data is there). Returns whether the cell has ground now.
+   */
+  private tryBuildGround(c: ResidentCell): boolean {
+    if (c.ground) return true;
+    const physics = this.physics;
+    if (!physics || !this.physicsReady || !c.loaded || !splatsReady(c.mesh)) return false;
+    this.ensureCorridors();
+    this.buildCellGround(c, physics);
+    this.streamer?.markLoaded(c.id);
+    this.syncGates();
+    this.subtitles?.say('Set', `${c.def.title} is in`, 2500);
+    return true;
   }
 
   // ── Streaming (W-3) ───────────────────────────────────────────────────────────────────────────────────────────
@@ -863,6 +874,7 @@ export class Game {
   private updateStreaming(feet: THREE.Vector3) {
     const s = this.streamer;
     if (!s || !this.physicsReady) return;
+    for (const c of this.cells.values()) if (c.loaded && !c.ground) this.tryBuildGround(c);
     for (const ev of s.update(feet)) this.onStreamEvent(ev);
     if (this.frame % 15 === 0) this.syncCellsHook();
   }
@@ -917,6 +929,8 @@ export class Game {
   private async initPhysics(resident: ResidentCell) {
     const gen = ++this.physicsGen;
     const R = await loadRapier();
+    // With Rapier already cached (a scene switch), we can get here before the LoD tree exists: wait for the splats.
+    for (let i = 0; i < 600 && gen === this.physicsGen && !splatsReady(resident.mesh); i++) await new Promise((r) => setTimeout(r, 50));
     if (gen !== this.physicsGen || !this.cells.has(resident.id)) return; // scene changed while loading
     this.loadingScreen?.progress('physics', 0.35);
     const physics = new PhysicsWorld(R);
@@ -953,8 +967,6 @@ export class Game {
     // (PHY-1 fallback), centred on the spawn, fenced where the scan ends — with the roads' doorways left open (W-3).
     this.ensureCorridors();
     if (!colliderLoaded) this.buildCellGround(resident, physics);
-    // Any neighbour that landed while Rapier was loading joins now.
-    for (const c of this.cells.values()) if (c !== resident && c.loaded && !c.ground) this.buildCellGround(c, physics);
 
     this.loadingScreen?.progress('physics', 0.7);
     const spawnY = this.ground ? this.heightAt(spawnXZ.x, spawnXZ.z) : spawnXZ.y;
@@ -1023,6 +1035,7 @@ export class Game {
     this.physicsReady = true;
     window.__coastPhysics = true;
     for (const c of this.cells.values()) if (c.ground) this.streamer?.markLoaded(c.id);
+    for (const c of this.cells.values()) if (c !== resident) this.tryBuildGround(c); // neighbours that landed meanwhile
     this.syncGates();
     this.syncCellsHook();
     this.loadingScreen?.progress('physics', 1);
