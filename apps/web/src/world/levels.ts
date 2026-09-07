@@ -23,6 +23,8 @@ export interface SceneDef {
   spawn?: Vec3;
   /** Half size (m) of the splat-derived ground grid around the spawn (PHY-1 fallback); default 40. */
   groundHalfExtent?: number;
+  /** Build Spark's LoD tree for this scan (default on; `?lod=0` turns it off everywhere). */
+  lod?: boolean;
   /** Doorways to neighbouring cells, in this cell's frame (SCH-1). */
   transitions?: CellTransition[];
   /** World position of the cell's frame (set from the level's placements). */
@@ -73,6 +75,9 @@ export const SCENES: Record<string, SceneDef> = {
     // has it at x ≈ 0…12, y ≈ 8, z ≈ 55…100.
     position: [-5, -8.3, -92],
     scale: 1,
+    // 21 % of this scan's splats have non-finite centres, which hangs Spark's Tiny LoD build forever: no LoD here
+    // (982k splats, well inside the desktop budget).
+    lod: false,
     camera: { pos: [0, 1.6, 2], lookAt: [0, 1.4, -5] },
     world: true,
     spawn: [0, 0, 1],

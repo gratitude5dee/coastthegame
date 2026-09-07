@@ -665,7 +665,7 @@ export class Game {
     const mesh = new SplatMesh({
       url: def.url,
       ...(def.fileType ? { fileType: def.fileType } : {}), // never pass fileType: undefined (breaks auto-detect)
-      lod: this.lod,
+      lod: this.lod && def.lod !== false,
       ...(first ? { onProgress: this.onFetchProgress } : {}),
       onLoad: () => (first ? this.onWorldLoaded(resident) : this.onCellLoaded(resident)),
     });
