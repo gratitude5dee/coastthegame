@@ -1,0 +1,38 @@
+{
+  "name": "pointer: no click, one deictic — whatever the pointer was on mid-sentence",
+  "source": "pointer",
+  "utterance": "make that bigger",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1200
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 100,
+      "pointerHit": "car_blue"
+    },
+    {
+      "t": 600,
+      "pointerHit": "cone_orange"
+    },
+    {
+      "t": 1100,
+      "pointerHit": "car_red"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

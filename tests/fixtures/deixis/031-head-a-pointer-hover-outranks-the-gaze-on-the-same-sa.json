@@ -1,0 +1,31 @@
+{
+  "name": "head: a pointer hover outranks the gaze on the same sample",
+  "source": "head",
+  "utterance": "scale that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "headHit": "car_blue",
+      "pointerHit": "can_red"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

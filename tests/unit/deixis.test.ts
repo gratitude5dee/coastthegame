@@ -16,8 +16,9 @@ import { toRealtimeTools, ALL_TOOL_NAMES, TOOL_MODES } from '../../packages/dire
 const scene: SceneIndex = {
   byDescription: (d) => (d.includes('car') ? ['car_red', 'car_blue'] : d.includes('truck') ? ['taco_truck'] : []),
   positionOf: (id) =>
-    ({ car_red: [2, 0, 0], car_blue: [10, 0, 0], taco_truck: [0, 0, -5], can_red: [1, 0, 1], cone_orange: [3, 0, 3] })[id] as
-      [number, number, number] | undefined,
+    ({ car_red: [2, 0, 0], car_blue: [10, 0, 0], taco_truck: [0, 0, -5], can_red: [1, 0, 1], cone_orange: [3, 0, 3], me: [0, 0, 0] })[
+      id
+    ] as [number, number, number] | undefined,
   radiusOf: () => 1,
 };
 
@@ -29,15 +30,22 @@ function ctx(partial: Partial<ResolveContext> & { buffer?: DeixisBuffer } = {}):
     deicticTotal: partial.deicticTotal ?? 1,
     speakerForward: partial.speakerForward ?? [0, -1],
     lastMentioned: partial.lastMentioned,
+    ...(partial.speakerId !== undefined ? { speakerId: partial.speakerId } : {}),
   };
 }
 
-// ── Fixture suite (goal.md QB-6 / SCH-6): precision is computed, not asserted as a constant ──
+// ── Fixture suite (goal.md QB-6 / SCH-6): precision is computed per pointing source, not asserted as a constant ──
+type FixtureSource = 'pointer' | 'hand' | 'head' | 'selection' | 'last' | 'desc' | 'none';
 interface Fixture {
   name: string;
+  /** What did the pointing in this fixture (QB-6 bands: pointer / hand ≥ 0.9, head / selection ≥ 0.7). */
+  source: FixtureSource;
   speech: { startMs: number; endMs: number };
   deicticTotal: number;
   buffer: DeixisSample[];
+  lastMentioned?: string;
+  speakerForward?: [number, number];
+  speakerId?: string;
   cases: {
     ref: unknown;
     kind: 'object' | 'place';
@@ -52,40 +60,72 @@ const fixtures: Fixture[] = readdirSync(fixturesDir)
 describe('deixis fixture suite', () => {
   let total = 0;
   let correct = 0;
+  const bySource: Record<string, { total: number; correct: number }> = {};
+  const tally = (source: string, ok: boolean) => {
+    total++;
+    const b = (bySource[source] ??= { total: 0, correct: 0 });
+    b.total++;
+    if (ok) {
+      correct++;
+      b.correct++;
+    }
+  };
   for (const fx of fixtures) {
     it(fx.name, () => {
       const buffer = new DeixisBuffer();
       for (const s of fx.buffer) buffer.push(s);
-      const c = ctx({ buffer, speech: fx.speech, deicticTotal: fx.deicticTotal });
+      const c = ctx({
+        buffer,
+        speech: fx.speech,
+        deicticTotal: fx.deicticTotal,
+        ...(fx.lastMentioned ? { lastMentioned: fx.lastMentioned } : {}),
+        ...(fx.speakerForward ? { speakerForward: fx.speakerForward } : {}),
+        ...(fx.speakerId ? { speakerId: fx.speakerId } : {}),
+      });
       for (const cs of fx.cases) {
-        total++;
         if (cs.kind === 'object') {
           const r = resolveObject(cs.ref as never, c);
           if (cs.expect.question) {
-            expect(r.value).toBeUndefined();
+            const ok = r.question === cs.expect.question && (r.value === undefined || r.confidence < 0.6);
+            tally(fx.source, ok);
             expect(r.question).toBe(cs.expect.question);
-            correct++;
             continue;
           }
           const ok =
             r.value === cs.expect.id && r.confidence >= (cs.expect.minConfidence ?? 0) && r.confidence <= (cs.expect.maxConfidence ?? 1);
+          tally(fx.source, ok);
           expect({ value: r.value, confidence: r.confidence, source: r.source }).toMatchObject({ value: cs.expect.id });
           if (cs.expect.minConfidence !== undefined) expect(r.confidence).toBeGreaterThanOrEqual(cs.expect.minConfidence);
           if (cs.expect.maxConfidence !== undefined) expect(r.confidence).toBeLessThanOrEqual(cs.expect.maxConfidence);
-          if (ok) correct++;
         } else {
           const r = resolvePlace(cs.ref as never, c);
+          if (cs.expect.question) {
+            tally(fx.source, r.question === cs.expect.question && r.value === undefined);
+            expect(r.value).toBeUndefined();
+            expect(r.question).toBe(cs.expect.question);
+            continue;
+          }
+          const ok = JSON.stringify(r.value) === JSON.stringify(cs.expect.pos) && r.confidence >= (cs.expect.minConfidence ?? 0);
+          tally(fx.source, ok);
           expect(r.value).toEqual(cs.expect.pos);
           if (cs.expect.minConfidence !== undefined) expect(r.confidence).toBeGreaterThanOrEqual(cs.expect.minConfidence);
-          correct++;
         }
       }
     });
   }
-  it('reports precision (QB-6 gate is ≥0.9 with pointer/hand, evaluated on the pointer/hand subset in M5)', () => {
+  it('QB-6: ≥ 60 cases; precision ≥ 0.9 with a pointer or a hand ray, ≥ 0.7 head-ray / selection-only', () => {
     const precision = total ? correct / total : 0;
-    console.log(`deixis fixture precision: ${correct}/${total} = ${precision.toFixed(3)}`);
+    const line = Object.entries(bySource)
+      .map(([k, v]) => `${k} ${v.correct}/${v.total}`)
+      .join(' · ');
+    console.log(`deixis fixture precision: ${correct}/${total} = ${precision.toFixed(3)} (${line})`);
+    expect(total).toBeGreaterThanOrEqual(60);
     expect(precision).toBeGreaterThanOrEqual(0.9);
+    const p = (k: string) => (bySource[k] ? bySource[k].correct / bySource[k].total : 1);
+    expect(p('pointer')).toBeGreaterThanOrEqual(0.9);
+    expect(p('hand')).toBeGreaterThanOrEqual(0.9);
+    expect(p('head')).toBeGreaterThanOrEqual(0.7);
+    expect(p('selection')).toBeGreaterThanOrEqual(0.7);
   });
 });
 

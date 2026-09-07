@@ -1,0 +1,52 @@
+{
+  "name": "mixed: pinch for the thing, click for the place",
+  "source": "hand",
+  "utterance": "put that there",
+  "speech": {
+    "startMs": 0,
+    "endMs": 2000
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 500,
+      "handHit": {
+        "hand": "right",
+        "id": "can_red",
+        "point": [1, 0, 1]
+      },
+      "pinchStrength": 0.9
+    },
+    {
+      "t": 1500,
+      "pointerHit": "ground",
+      "clickEdge": true,
+      "groundPoint": [3, 0, -6]
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.95,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 2
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [3, 0, -6],
+        "minConfidence": 0.9
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "controller: two triggers for two deictics, the second on the ground",
+  "source": "hand",
+  "utterance": "put that there",
+  "speech": {
+    "startMs": 0,
+    "endMs": 2000
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 600,
+      "handHit": {
+        "hand": "right",
+        "id": "can_red",
+        "point": [1, 0, 1]
+      },
+      "clickEdge": true
+    },
+    {
+      "t": 1500,
+      "handHit": {
+        "hand": "right",
+        "id": "ground",
+        "point": [5, 0, -2]
+      },
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.95,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 2
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [5, 0, -2],
+        "minConfidence": 0.95
+      }
+    }
+  ]
+}

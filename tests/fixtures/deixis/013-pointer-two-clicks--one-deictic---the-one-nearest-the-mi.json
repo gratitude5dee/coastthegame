@@ -1,0 +1,36 @@
+{
+  "name": "pointer: two clicks, one deictic — the one nearest the middle of the sentence",
+  "source": "pointer",
+  "utterance": "delete that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 50,
+      "pointerHit": "car_red",
+      "clickEdge": true
+    },
+    {
+      "t": 650,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

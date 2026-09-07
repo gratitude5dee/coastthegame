@@ -1,0 +1,39 @@
+{
+  "name": "pointer: click too long after the speech is ignored; the hovered thing at the nominal time wins",
+  "source": "pointer",
+  "utterance": "rotate that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 450,
+      "pointerHit": "car_red"
+    },
+    {
+      "t": 550,
+      "pointerHit": "car_red"
+    },
+    {
+      "t": 2400,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "car_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

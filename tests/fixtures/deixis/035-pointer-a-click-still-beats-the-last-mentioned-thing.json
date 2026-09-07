@@ -1,0 +1,32 @@
+{
+  "name": "last: a click still beats the last-mentioned thing",
+  "source": "pointer",
+  "utterance": "delete it",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "pointerHit": "cone_orange",
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "it",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ],
+  "lastMentioned": "can_red"
+}

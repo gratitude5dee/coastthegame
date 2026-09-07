@@ -1,0 +1,35 @@
+{
+  "name": "pointer: click too long before the speech is ignored",
+  "source": "pointer",
+  "utterance": "scale that",
+  "speech": {
+    "startMs": 3000,
+    "endMs": 4000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 1500,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    },
+    {
+      "t": 3500,
+      "pointerHit": "cone_orange"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

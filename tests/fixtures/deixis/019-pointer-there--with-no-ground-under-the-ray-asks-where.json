@@ -1,0 +1,45 @@
+{
+  "name": "pointer: 'there' with no ground under the ray asks where",
+  "source": "pointer",
+  "utterance": "put it there",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 300,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    },
+    {
+      "t": 700,
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "it",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 2
+      },
+      "kind": "place",
+      "expect": {
+        "question": "where?"
+      }
+    }
+  ]
+}

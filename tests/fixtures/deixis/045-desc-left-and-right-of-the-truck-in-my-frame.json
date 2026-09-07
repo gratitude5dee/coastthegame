@@ -1,0 +1,45 @@
+{
+  "name": "relation: left and right of the truck in my frame",
+  "source": "desc",
+  "utterance": "left of the truck",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 0,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "desc": "truck"
+          },
+          "rel": "left",
+          "distance_m": 2
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [-2, 0, -5],
+        "minConfidence": 0.8
+      }
+    },
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "desc": "truck"
+          },
+          "rel": "right",
+          "distance_m": 2
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [2, 0, -5],
+        "minConfidence": 0.8
+      }
+    }
+  ]
+}

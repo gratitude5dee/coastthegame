@@ -1,0 +1,28 @@
+{
+  "name": "relation: inside is the thing's own spot",
+  "source": "desc",
+  "utterance": "put it in the truck",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 0,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "id": "taco_truck"
+          },
+          "rel": "inside"
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [0, 0, -5],
+        "minConfidence": 0.85
+      }
+    }
+  ]
+}

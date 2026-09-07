@@ -1,0 +1,51 @@
+{
+  "name": "mixed: click for the thing, pinch on the ground for the place",
+  "source": "hand",
+  "utterance": "move that there",
+  "speech": {
+    "startMs": 0,
+    "endMs": 2000
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 500,
+      "pointerHit": "cone_orange",
+      "clickEdge": true
+    },
+    {
+      "t": 1500,
+      "handHit": {
+        "hand": "right",
+        "id": "ground",
+        "point": [8, 0, 2]
+      },
+      "pinchStrength": 0.9
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 2
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [8, 0, 2],
+        "minConfidence": 0.95
+      }
+    }
+  ]
+}

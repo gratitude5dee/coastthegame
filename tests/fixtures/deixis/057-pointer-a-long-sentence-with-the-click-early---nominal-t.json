@@ -1,0 +1,47 @@
+{
+  "name": "timing: a long sentence with the click early — nominal time is still inside ±700 ms of it",
+  "source": "pointer",
+  "utterance": "could you please delete that one over there for me",
+  "speech": {
+    "startMs": 0,
+    "endMs": 3000
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 900,
+      "pointerHit": "cone_orange",
+      "clickEdge": true
+    },
+    {
+      "t": 2000,
+      "pointerHit": "ground",
+      "groundPoint": [2, 0, -8]
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 2
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [2, 0, -8],
+        "minConfidence": 0.9
+      }
+    }
+  ]
+}

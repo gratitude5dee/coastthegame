@@ -1,0 +1,35 @@
+{
+  "name": "pointer: click after the last word still counts (late pointing)",
+  "source": "pointer",
+  "utterance": "move that",
+  "speech": {
+    "startMs": 1000,
+    "endMs": 1600
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 1300,
+      "pointerHit": "car_red"
+    },
+    {
+      "t": 2200,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

@@ -1,15 +1,21 @@
 {
-  "name": "Vision Pro: head ray only, no pinch \u2014 lower confidence band, still resolves",
+  "name": "hand: a weak pinch is not an event — the head ray at the nominal time resolves instead",
+  "source": "hand",
   "utterance": "delete that",
   "speech": {
-    "startMs": 100,
-    "endMs": 900
+    "startMs": 0,
+    "endMs": 1000
   },
   "deicticTotal": 1,
   "buffer": [
     {
       "t": 200,
-      "headHit": "cone_orange"
+      "handHit": {
+        "hand": "right",
+        "id": "car_blue",
+        "point": [10, 0, 0]
+      },
+      "pinchStrength": 0.4
     },
     {
       "t": 500,
@@ -17,7 +23,7 @@
     },
     {
       "t": 800,
-      "headHit": "car_blue"
+      "headHit": "car_red"
     }
   ],
   "cases": [

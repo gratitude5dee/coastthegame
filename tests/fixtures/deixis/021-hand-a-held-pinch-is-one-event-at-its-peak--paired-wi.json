@@ -1,0 +1,71 @@
+{
+  "name": "hand: a held pinch is one event at its peak, paired with the one deictic",
+  "source": "hand",
+  "utterance": "paint that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1500
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 200,
+      "handHit": {
+        "hand": "right",
+        "id": "cone_orange",
+        "point": [3, 0, 3]
+      },
+      "pinchStrength": 0.75
+    },
+    {
+      "t": 233,
+      "handHit": {
+        "hand": "right",
+        "id": "cone_orange",
+        "point": [3, 0, 3]
+      },
+      "pinchStrength": 0.9
+    },
+    {
+      "t": 266,
+      "handHit": {
+        "hand": "right",
+        "id": "taco_truck",
+        "point": [0, 0, -5]
+      },
+      "pinchStrength": 0.97
+    },
+    {
+      "t": 299,
+      "handHit": {
+        "hand": "right",
+        "id": "taco_truck",
+        "point": [0, 0, -5]
+      },
+      "pinchStrength": 0.8
+    },
+    {
+      "t": 400,
+      "handHit": {
+        "hand": "right",
+        "id": "car_red",
+        "point": [2, 0, 0]
+      },
+      "pinchStrength": 0.2
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "taco_truck",
+        "minConfidence": 0.95,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

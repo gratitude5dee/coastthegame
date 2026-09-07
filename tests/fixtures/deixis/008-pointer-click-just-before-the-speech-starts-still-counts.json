@@ -1,0 +1,35 @@
+{
+  "name": "pointer: click just before the speech starts still counts (padded window)",
+  "source": "pointer",
+  "utterance": "paint that",
+  "speech": {
+    "startMs": 1000,
+    "endMs": 1800
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 400,
+      "pointerHit": "cone_orange",
+      "clickEdge": true
+    },
+    {
+      "t": 1400,
+      "pointerHit": "car_red"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

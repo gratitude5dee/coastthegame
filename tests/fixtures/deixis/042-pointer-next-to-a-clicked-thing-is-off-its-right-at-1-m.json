@@ -1,0 +1,36 @@
+{
+  "name": "relation: next to a clicked thing is off its right at 1 m",
+  "source": "pointer",
+  "utterance": "put the ball next to that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "pointerHit": "taco_truck",
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "deictic": "that",
+            "ordinal": 1
+          },
+          "rel": "next_to",
+          "distance_m": 1
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [1, 0, -5],
+        "minConfidence": 0.8
+      }
+    }
+  ]
+}

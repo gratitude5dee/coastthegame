@@ -1,0 +1,62 @@
+{
+  "name": "hand: one pinch peak, one deictic",
+  "source": "hand",
+  "utterance": "delete that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 900
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 300,
+      "handHit": {
+        "hand": "right",
+        "id": "car_red",
+        "point": [2, 0, 0]
+      },
+      "pinchStrength": 0.3
+    },
+    {
+      "t": 400,
+      "handHit": {
+        "hand": "right",
+        "id": "car_red",
+        "point": [2, 0, 0]
+      },
+      "pinchStrength": 0.85
+    },
+    {
+      "t": 500,
+      "handHit": {
+        "hand": "right",
+        "id": "car_red",
+        "point": [2, 0, 0]
+      },
+      "pinchStrength": 0.95
+    },
+    {
+      "t": 600,
+      "handHit": {
+        "hand": "right",
+        "id": "can_red",
+        "point": [1, 0, 1]
+      },
+      "pinchStrength": 0.4
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "car_red",
+        "minConfidence": 0.95,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

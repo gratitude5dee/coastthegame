@@ -1,0 +1,27 @@
+{
+  "name": "relation: an ambiguous anchor asks before placing",
+  "source": "desc",
+  "utterance": "put the ball behind the car",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 0,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "desc": "car"
+          },
+          "rel": "behind"
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "question": "this one?"
+      }
+    }
+  ]
+}

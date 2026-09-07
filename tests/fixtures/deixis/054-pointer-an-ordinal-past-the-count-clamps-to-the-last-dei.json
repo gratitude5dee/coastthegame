@@ -1,0 +1,31 @@
+{
+  "name": "ordinals: an ordinal past the count clamps to the last deictic",
+  "source": "pointer",
+  "utterance": "that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "pointerHit": "car_blue",
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 5
+      },
+      "kind": "object",
+      "expect": {
+        "id": "car_blue",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "hand: left-hand pinch counts the same as right",
+  "source": "hand",
+  "utterance": "move that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "handHit": {
+        "hand": "left",
+        "id": "can_red",
+        "point": [1, 0, 1]
+      },
+      "pinchStrength": 0.88
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.95,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

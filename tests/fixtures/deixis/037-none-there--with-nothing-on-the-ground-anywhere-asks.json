@@ -1,0 +1,27 @@
+{
+  "name": "none: 'there' with nothing on the ground anywhere asks where",
+  "source": "none",
+  "utterance": "put the ball there",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 1
+      },
+      "kind": "place",
+      "expect": {
+        "question": "where?"
+      }
+    }
+  ]
+}

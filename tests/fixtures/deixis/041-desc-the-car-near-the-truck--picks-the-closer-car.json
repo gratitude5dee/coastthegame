@@ -1,0 +1,26 @@
+{
+  "name": "desc: 'the car near the truck' picks the closer car",
+  "source": "desc",
+  "utterance": "move the car near the truck",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "desc": "car",
+        "near": {
+          "desc": "truck"
+        }
+      },
+      "kind": "object",
+      "expect": {
+        "id": "car_red",
+        "minConfidence": 0.4
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "name": "pointer: no clicks, two deictics — hovers nearest the two nominal times",
+  "source": "pointer",
+  "utterance": "put that on that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 3000
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 900,
+      "pointerHit": "can_red"
+    },
+    {
+      "t": 1500,
+      "pointerHit": "car_blue"
+    },
+    {
+      "t": 2100,
+      "pointerHit": "taco_truck"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 2
+      },
+      "kind": "object",
+      "expect": {
+        "id": "taco_truck",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

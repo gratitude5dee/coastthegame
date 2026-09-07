@@ -1,0 +1,22 @@
+{
+  "name": "desc: an unknown description asks which",
+  "source": "desc",
+  "utterance": "delete the unicorn",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "desc": "unicorn"
+      },
+      "kind": "object",
+      "expect": {
+        "question": "which?"
+      }
+    }
+  ]
+}

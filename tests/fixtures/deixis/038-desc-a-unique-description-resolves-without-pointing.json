@@ -1,0 +1,23 @@
+{
+  "name": "desc: a unique description resolves without pointing",
+  "source": "desc",
+  "utterance": "delete the truck",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "desc": "truck"
+      },
+      "kind": "object",
+      "expect": {
+        "id": "taco_truck",
+        "minConfidence": 0.85
+      }
+    }
+  ]
+}

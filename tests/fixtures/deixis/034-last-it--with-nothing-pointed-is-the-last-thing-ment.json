@@ -1,0 +1,33 @@
+{
+  "name": "last: 'it' with nothing pointed is the last thing mentioned",
+  "source": "last",
+  "utterance": "make it bigger",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 300
+    },
+    {
+      "t": 700
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "it",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.6,
+        "maxConfidence": 0.6
+      }
+    }
+  ],
+  "lastMentioned": "can_red"
+}

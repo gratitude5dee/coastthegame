@@ -1,5 +1,6 @@
 {
-  "name": "put that there \u2014 right-hand pinch on the truck, then pinch on the ground",
+  "name": "hand: two pinches for 'put that there' — object then ground point",
+  "source": "hand",
   "utterance": "put that there",
   "speech": {
     "startMs": 1000,
@@ -19,8 +20,8 @@
         "id": "taco_truck",
         "point": [0, 0, -5]
       },
-      "headHit": "car_blue",
-      "pinchStrength": 0.92
+      "pinchStrength": 0.92,
+      "headHit": "car_blue"
     },
     {
       "t": 1500,
@@ -29,14 +30,13 @@
     },
     {
       "t": 1800,
-      "groundPoint": [4, 0, -9],
-      "headHit": "pier_dj",
-      "pinchStrength": 0.85,
       "handHit": {
         "hand": "right",
         "id": "ground",
         "point": [4, 0, -9]
-      }
+      },
+      "pinchStrength": 0.85,
+      "headHit": "pier_dj"
     }
   ],
   "cases": [
@@ -48,7 +48,8 @@
       "kind": "object",
       "expect": {
         "id": "taco_truck",
-        "minConfidence": 0.9
+        "minConfidence": 0.95,
+        "maxConfidence": 1.0
       }
     },
     {
@@ -59,7 +60,7 @@
       "kind": "place",
       "expect": {
         "pos": [4, 0, -9],
-        "minConfidence": 0.9
+        "minConfidence": 0.95
       }
     }
   ]

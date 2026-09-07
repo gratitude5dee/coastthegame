@@ -1,0 +1,30 @@
+{
+  "name": "selection: nothing pointed, something selected — the selection, at its band",
+  "source": "selection",
+  "utterance": "paint that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "selection": "car_red"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "car_red",
+        "minConfidence": 0.8,
+        "maxConfidence": 0.8
+      }
+    }
+  ]
+}

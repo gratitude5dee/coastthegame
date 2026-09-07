@@ -1,0 +1,30 @@
+{
+  "name": "head: 'there' by gaze is the ground under the head ray, head confidence",
+  "source": "head",
+  "utterance": "put the cone there",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "headHit": "ground",
+      "groundPoint": [7, 0, -4]
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 1
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [7, 0, -4],
+        "minConfidence": 0.7
+      }
+    }
+  ]
+}

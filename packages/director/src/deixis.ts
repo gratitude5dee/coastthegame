@@ -148,6 +148,14 @@ export function resolvePlace(ref: PlaceRef, ctx: ResolveContext): Resolution<[nu
   const anchor = resolveObject(ref.relative.to, ctx);
   const ap = anchor.value ? ctx.scene.positionOf(anchor.value) : undefined;
   if (!ap || !anchor.value) return { candidates: [], confidence: 0, source: 'none', question: 'next to what?' };
+  if (anchor.question && anchor.candidates.length > 1) {
+    // "behind the car" with two cars: one place per candidate, and the anchor's question comes along.
+    const places = anchor.candidates
+      .slice(0, 2)
+      .map((id) => resolvePlace({ relative: { ...ref.relative, to: { id } } }, ctx).value)
+      .filter((p): p is [number, number, number] => !!p);
+    return { candidates: places, confidence: anchor.confidence, source: anchor.source, question: anchor.question };
+  }
   const d = ref.relative.distance_m ?? Math.max(1, ctx.scene.radiusOf(anchor.value) * 1.5);
   const [fx, fz] = normalize2(ctx.speakerForward);
   // right = forward × up in a Y-up right-handed frame: (fx,0,fz)×(0,1,0) = (-fz, 0, fx)

@@ -1,0 +1,40 @@
+{
+  "name": "pointer: 'there' without a click is the ground under the hover at its nominal time",
+  "source": "pointer",
+  "utterance": "drop a crate there",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 300,
+      "pointerHit": "ground",
+      "groundPoint": [1, 0, -2]
+    },
+    {
+      "t": 500,
+      "pointerHit": "ground",
+      "groundPoint": [6, 0, -3]
+    },
+    {
+      "t": 800,
+      "pointerHit": "ground",
+      "groundPoint": [9, 0, -1]
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 1
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [6, 0, -3],
+        "minConfidence": 0.9
+      }
+    }
+  ]
+}

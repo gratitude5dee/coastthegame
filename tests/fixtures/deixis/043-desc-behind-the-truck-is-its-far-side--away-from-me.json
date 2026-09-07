@@ -1,0 +1,29 @@
+{
+  "name": "relation: behind the truck is its far side (away from me)",
+  "source": "desc",
+  "utterance": "drop a cone behind the truck",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 0,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "desc": "truck"
+          },
+          "rel": "behind",
+          "distance_m": 2
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [0, 0, -7],
+        "minConfidence": 0.8
+      }
+    }
+  ]
+}

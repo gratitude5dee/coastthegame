@@ -1,0 +1,35 @@
+{
+  "name": "relation: a relation to a gazed thing carries the gaze's confidence",
+  "source": "head",
+  "utterance": "next to that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "headHit": "can_red"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "deictic": "that",
+            "ordinal": 1
+          },
+          "rel": "next_to",
+          "distance_m": 1
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [2, 0, 1],
+        "minConfidence": 0.7
+      }
+    }
+  ]
+}

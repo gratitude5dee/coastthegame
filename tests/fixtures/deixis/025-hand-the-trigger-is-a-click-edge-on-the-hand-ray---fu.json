@@ -1,0 +1,35 @@
+{
+  "name": "controller: the trigger is a click edge on the hand ray — full hand confidence",
+  "source": "hand",
+  "utterance": "paint that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "handHit": {
+        "hand": "right",
+        "id": "cone_orange",
+        "point": [3, 0, 3]
+      },
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.95,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "name": "relation: behind me is at my back, in front of me along my forward (the speaker flips depth)",
+  "source": "desc",
+  "utterance": "drop it behind me",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 0,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "id": "me"
+          },
+          "rel": "behind",
+          "distance_m": 2
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [0, 0, 2],
+        "minConfidence": 0.85
+      }
+    },
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "id": "me"
+          },
+          "rel": "in_front",
+          "distance_m": 2
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [0, 0, -2],
+        "minConfidence": 0.85
+      }
+    }
+  ],
+  "speakerId": "me"
+}

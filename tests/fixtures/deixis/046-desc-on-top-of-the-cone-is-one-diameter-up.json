@@ -1,0 +1,28 @@
+{
+  "name": "relation: on top of the cone is one diameter up",
+  "source": "desc",
+  "utterance": "put it on the cone",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 0,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "id": "cone_orange"
+          },
+          "rel": "on_top"
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [3, 2, 3],
+        "minConfidence": 0.85
+      }
+    }
+  ]
+}

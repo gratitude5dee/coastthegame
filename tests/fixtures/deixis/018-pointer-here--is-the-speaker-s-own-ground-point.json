@@ -1,0 +1,30 @@
+{
+  "name": "pointer: 'here' is the speaker's own ground point",
+  "source": "pointer",
+  "utterance": "bring the ball here",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [
+    {
+      "t": 500,
+      "pointerHit": "ground",
+      "groundPoint": [0, 0, 0.5]
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "here",
+        "ordinal": 1
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [0, 0, 0.5],
+        "minConfidence": 0.9
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "desc: an ambiguous description asks 'this one?' with two candidates",
+  "source": "desc",
+  "utterance": "paint the car red",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 1,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "desc": "car"
+      },
+      "kind": "object",
+      "expect": {
+        "question": "this one?"
+      }
+    }
+  ]
+}

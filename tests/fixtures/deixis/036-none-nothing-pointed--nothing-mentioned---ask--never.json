@@ -1,5 +1,6 @@
 {
-  "name": "no pointing at all \u2014 resolver must ask, never guess",
+  "name": "none: nothing pointed, nothing mentioned — ask, never guess",
+  "source": "none",
   "utterance": "paint that",
   "speech": {
     "startMs": 100,

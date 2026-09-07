@@ -1,0 +1,48 @@
+{
+  "name": "mixed: 'this' and 'it' are pointing words like 'that'",
+  "source": "pointer",
+  "utterance": "put this on it",
+  "speech": {
+    "startMs": 0,
+    "endMs": 2000
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 600,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    },
+    {
+      "t": 1400,
+      "pointerHit": "taco_truck",
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "this",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "it",
+        "ordinal": 2
+      },
+      "kind": "object",
+      "expect": {
+        "id": "taco_truck",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

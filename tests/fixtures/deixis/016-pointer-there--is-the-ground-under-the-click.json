@@ -1,0 +1,48 @@
+{
+  "name": "pointer: 'there' is the ground under the click",
+  "source": "pointer",
+  "utterance": "put it there",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1200
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 400,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    },
+    {
+      "t": 900,
+      "pointerHit": "ground",
+      "clickEdge": true,
+      "groundPoint": [4, 0, -9]
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "it",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "there",
+        "ordinal": 2
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [4, 0, -9],
+        "minConfidence": 0.9
+      }
+    }
+  ]
+}

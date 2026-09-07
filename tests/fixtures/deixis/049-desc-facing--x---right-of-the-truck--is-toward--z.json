@@ -1,0 +1,30 @@
+{
+  "name": "relation: facing +X, 'right of the truck' is toward +Z",
+  "source": "desc",
+  "utterance": "right of the truck",
+  "speech": {
+    "startMs": 0,
+    "endMs": 1000
+  },
+  "deicticTotal": 0,
+  "buffer": [],
+  "cases": [
+    {
+      "ref": {
+        "relative": {
+          "to": {
+            "desc": "truck"
+          },
+          "rel": "right",
+          "distance_m": 2
+        }
+      },
+      "kind": "place",
+      "expect": {
+        "pos": [0, 0, -3],
+        "minConfidence": 0.8
+      }
+    }
+  ],
+  "speakerForward": [1, 0]
+}

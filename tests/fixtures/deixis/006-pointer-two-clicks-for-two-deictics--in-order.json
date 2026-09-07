@@ -1,0 +1,56 @@
+{
+  "name": "pointer: two clicks for two deictics, in order",
+  "source": "pointer",
+  "utterance": "put that on that",
+  "speech": {
+    "startMs": 2000,
+    "endMs": 3500
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 2300,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    },
+    {
+      "t": 2600,
+      "pointerHit": "car_red"
+    },
+    {
+      "t": 3100,
+      "pointerHit": "taco_truck",
+      "clickEdge": true
+    },
+    {
+      "t": 3400,
+      "pointerHit": "car_blue"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 2
+      },
+      "kind": "object",
+      "expect": {
+        "id": "taco_truck",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

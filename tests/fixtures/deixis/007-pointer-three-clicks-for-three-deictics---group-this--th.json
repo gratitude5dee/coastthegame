@@ -1,0 +1,65 @@
+{
+  "name": "pointer: three clicks for three deictics — group this, that and that",
+  "source": "pointer",
+  "utterance": "group this and that and that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 2400
+  },
+  "deicticTotal": 3,
+  "buffer": [
+    {
+      "t": 300,
+      "pointerHit": "can_red",
+      "clickEdge": true
+    },
+    {
+      "t": 1200,
+      "pointerHit": "cone_orange",
+      "clickEdge": true
+    },
+    {
+      "t": 2100,
+      "pointerHit": "car_blue",
+      "clickEdge": true
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "this",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 2
+      },
+      "kind": "object",
+      "expect": {
+        "id": "cone_orange",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    },
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 3
+      },
+      "kind": "object",
+      "expect": {
+        "id": "car_blue",
+        "minConfidence": 0.9,
+        "maxConfidence": 1.0
+      }
+    }
+  ]
+}

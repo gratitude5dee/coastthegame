@@ -1,0 +1,54 @@
+{
+  "name": "head: gaze only, two deictics — the gaze at each nominal time",
+  "source": "head",
+  "utterance": "put that on that",
+  "speech": {
+    "startMs": 0,
+    "endMs": 3000
+  },
+  "deicticTotal": 2,
+  "buffer": [
+    {
+      "t": 900,
+      "headHit": "can_red"
+    },
+    {
+      "t": 1500,
+      "headHit": "car_blue"
+    },
+    {
+      "t": 2000,
+      "headHit": "taco_truck"
+    },
+    {
+      "t": 2900,
+      "headHit": "cone_orange"
+    }
+  ],
+  "cases": [
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 1
+      },
+      "kind": "object",
+      "expect": {
+        "id": "can_red",
+        "minConfidence": 0.7,
+        "maxConfidence": 0.79
+      }
+    },
+    {
+      "ref": {
+        "deictic": "that",
+        "ordinal": 2
+      },
+      "kind": "object",
+      "expect": {
+        "id": "taco_truck",
+        "minConfidence": 0.7,
+        "maxConfidence": 0.79
+      }
+    }
+  ]
+}
