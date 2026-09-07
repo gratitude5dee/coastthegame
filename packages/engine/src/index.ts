@@ -7,6 +7,7 @@ export * from './world/ground';
 export * from './physics/world';
 export * from './actors/character';
 export * from './camera/cameraRig';
+export * from './camera/path';
 export * from './props/props';
 export * from './vehicles/lowrider';
 export * from './xr/locomotion';

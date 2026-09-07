@@ -36,6 +36,7 @@ import { createMissionCard, type MissionCard } from '../ui/missionCard';
 import { GhostActor, type ActorLook } from './ghosts';
 import { exportCut, type ExportResult, type ExportScene, type Overlay } from './exporter';
 import { sha256Hex, uploadCut, uploadCutManifest, uploadTake } from '../api';
+import { CameraPath, type CameraKey } from '@coast/engine';
 
 /** Gives a ghost body to a take's performer (the game knows the looks; tests get capsules). */
 export type GhostFactory = (actorId: string) => GhostActor;
@@ -121,6 +122,8 @@ export class StudioSession {
   lastShare: string | null = null;
   /** The provenance manifest of the last exported cut (STU-5). */
   lastManifest: CutManifest | null = null;
+  /** The director's keyframed camera path (CAM-7): with two keys or more it drives the export instead of a take's camera. */
+  cameraPath: CameraKey[] | null = null;
   /** The reel (MIS-4): best take + stars per mission, persisted across visits. */
   readonly reel: Reel;
   /** Watching an earned mission's take again (from the reel) — its own set and ghost, the mission's set untouched. */
@@ -498,6 +501,7 @@ export class StudioSession {
         : [],
     };
     const takes = this.set.layers.map((l) => l.take);
+    const path = this.cameraPath && this.cameraPath.length >= 2 ? new CameraPath(this.cameraPath) : null;
     // The provenance manifest (STU-5): everything the picture came from, hashed to the file once it exists.
     const manifestFor = (r: ExportResult, sha256?: string): CutManifest =>
       buildCutManifest({
@@ -513,6 +517,7 @@ export class StudioSession {
         captions: overlay.captions ?? [],
         video: { bytes: r.blob.size, mime: r.mime, codec: r.codec, ...(sha256 ? { sha256 } : {}) },
         cells: [{ id: this.cellVersion, version: this.cellVersion }],
+        ...(path ? { cameraTake: 'path' } : {}),
         author: { userId: this.sessionId ?? 'guest' },
         app: { version: __COAST_VERSION__, commit: __COAST_COMMIT__ },
       });
@@ -538,6 +543,10 @@ export class StudioSession {
           },
           seek: (t) => {
             this.seekSet(t);
+            if (path) {
+              path.apply(host.camera, path.startS + (t - plan.startS)); // the path runs from the cut's first frame
+              return;
+            }
             const c = camLayer.player.poseAt(t, camPose);
             host.camera.position.set(c.camPos[0], c.camPos[1], c.camPos[2]);
             host.camera.quaternion.set(c.camQuat[0], c.camQuat[1], c.camQuat[2], c.camQuat[3]);

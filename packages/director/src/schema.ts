@@ -28,6 +28,8 @@ export type PlaceRef =
 
 export type ShotName = 'wide' | 'medium' | 'close' | 'low' | 'high' | 'dutch';
 export type CameraMove = 'push_in' | 'pull_out' | 'orbit' | 'crane_up' | 'crane_down' | 'dolly_left' | 'dolly_right';
+/** Keyframed paths (CAM-7): drop a key where the camera is, play the path (locked shot), stop / hand back, clear, drop the last key. */
+export type CameraPathOp = 'key' | 'play' | 'stop' | 'clear' | 'undo_key';
 
 export type SceneAct =
   | { op: 'spawn'; asset?: string; prompt?: string; place: PlaceRef; scale?: number; tags?: string[] }
@@ -43,7 +45,19 @@ export type SceneAct =
   | { op: 'play_anim'; actor: ObjectRef; clip: string; loop?: boolean }
   | { op: 'possess'; actor: ObjectRef }
   | { op: 'replay_take'; take: string; actor: ObjectRef }
-  | { op: 'camera'; shot?: ShotName; follow?: ObjectRef; move?: CameraMove; duration_ms?: number; lens_mm?: number; look_at?: ObjectRef }
+  | {
+      op: 'camera';
+      shot?: ShotName;
+      follow?: ObjectRef;
+      move?: CameraMove;
+      duration_ms?: number;
+      lens_mm?: number;
+      look_at?: ObjectRef;
+      path?: CameraPathOp;
+      /** With `path: 'play'`: play the path over this many seconds (re-timed) and whether it loops. */
+      path_seconds?: number;
+      loop?: boolean;
+    }
   | { op: 'record'; action: 'start' | 'stop' }
   | { op: 'mark_beat'; label: string }
   | { op: 'undo'; n?: number }
@@ -232,13 +246,16 @@ const ALL_TOOLS = [
   ]),
   tool('possess', 'Give the player control of an actor.', { actor: REF }, ['actor']),
   tool('replay_take', 'Replay a recorded take on an actor.', { take: { type: 'string' }, actor: REF }, ['take', 'actor']),
-  tool('camera', 'Set a shot preset, follow target, or perform a camera move.', {
+  tool('camera', 'Set a shot preset, follow target, perform a camera move, or work the keyframed path (key / play / stop / clear).', {
     shot: { enum: ['wide', 'medium', 'close', 'low', 'high', 'dutch'] },
     follow: REF,
     move: { enum: ['push_in', 'pull_out', 'orbit', 'crane_up', 'crane_down', 'dolly_left', 'dolly_right'] },
     duration_ms: { type: 'number' },
     lens_mm: { type: 'number' },
     look_at: REF,
+    path: { enum: ['key', 'play', 'stop', 'clear', 'undo_key'] },
+    path_seconds: { type: 'number' },
+    loop: { type: 'boolean' },
   }),
   tool('record', 'Start ("action") or stop ("cut") recording the current shot.', { action: { enum: ['start', 'stop'] } }, ['action']),
   tool('mark_beat', 'Drop a labelled marker on the timeline.', { label: { type: 'string' } }, ['label']),

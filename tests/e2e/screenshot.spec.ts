@@ -124,7 +124,7 @@ test('physics smoke: rapier + character controller step without errors', async (
     },
   );
   await expect(page.locator('#coast-sub')).toContainText('✓ camera low');
-  expect(await page.locator('#hud').innerText()).toContain('time golden');
+  await expect(page.locator('#hud')).toContainText('time golden', { timeout: 30_000 }); // the HUD redraws every 10 frames
   // "move the ball next to the car": a described object, a relative place — no pointing needed.
   const moved = await page.evaluate(() => {
     const r = window.__coastSay!('move the ball next to the car').results[0]!;
@@ -152,5 +152,14 @@ test('physics smoke: rapier + character controller step without errors', async (
     timeout: 30_000,
   });
   await expect(page.locator('#coast-say')).toBeHidden();
+  // A keyframed path (CAM-7): two keys where the camera stood, played back as a locked shot that hands the camera back.
+  const keyed = await page.evaluate(() => window.__coastSay!('set a key, pull out, set a key').results.map((r) => r.ok));
+  expect(keyed).toEqual([true, true, true]);
+  expect(await page.evaluate(() => window.__coastDirector?.path.keys)).toBe(2);
+  expect(await page.evaluate(() => window.__coastSay!('play the path in 1 second').results[0]!.ok)).toBe(true);
+  await page.waitForFunction(() => window.__coastDirector?.path.locked === true, null, { timeout: 30_000 });
+  await page.waitForFunction(() => window.__coastDirector?.path.locked === false, null, { timeout: 90_000 });
+  expect(await page.evaluate(() => window.__coastSay!('clear the path').results[0]!.ok)).toBe(true);
+  expect(await page.evaluate(() => window.__coastDirector?.path.keys)).toBe(0);
   expect(errors, errors.join('\n')).toHaveLength(0);
 });

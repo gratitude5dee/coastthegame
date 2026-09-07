@@ -6,6 +6,7 @@
  * In XR the rig must move the `localFrame` group instead of the camera (CAM-4) — the XR path is added in M3 (Quest).
  */
 import * as THREE from 'three';
+import type { CameraPath } from './path';
 import { RIG_PRESETS, RIG_TRANSITION_MS, SHOT_PRESETS, type RigMode, type RigParams, type ShotPreset } from './rig';
 
 export type CameraMoveName = 'push_in' | 'pull_out' | 'orbit' | 'crane_up' | 'crane_down' | 'dolly_left' | 'dolly_right';
@@ -59,6 +60,8 @@ export class CameraRig {
   private rollTo = 0;
   /** An orbit move in flight: yaw sweeps `by` radians over `ms`. */
   private orbit: { from: number; by: number; t: number; ms: number } | null = null;
+  /** A locked shot (CAM-2 / CAM-7): the camera rides a keyframed path instead of following the target. */
+  private lockedPath: { path: CameraPath; t: number; speed: number; loop: boolean; paused: boolean } | null = null;
   /** Look angles: yaw around Y, pitch around X (radians). Shared across modes so switching keeps the direction. */
   yaw = 0;
   pitch = 0;
@@ -159,6 +162,53 @@ export class CameraRig {
     this.setMode(order[(i + 1) % order.length]!);
   }
 
+  /**
+   * Lock the camera to a keyframed path (CAM-7). Plays from the path's first key at `speed`× until the last key, then
+   * hands the camera back to the follow modes (unless `loop`). Director / producer only.
+   */
+  lock(path: CameraPath, opts: { speed?: number; loop?: boolean; startS?: number; paused?: boolean } = {}): boolean {
+    if (this.mode === 'actor' || path.size === 0) return false;
+    this.lockedPath = {
+      path,
+      t: opts.startS ?? path.startS,
+      speed: opts.speed ?? 1,
+      loop: opts.loop ?? false,
+      paused: opts.paused ?? false,
+    };
+    return true;
+  }
+
+  /** Free the camera (the follow smoothing re-seeds from wherever the path left it). */
+  unlock() {
+    if (!this.lockedPath) return;
+    this.lockedPath = null;
+    this.initialised = false;
+  }
+
+  get locked() {
+    return this.lockedPath !== null;
+  }
+
+  /** Path time (s) while locked. */
+  get pathTime(): number | null {
+    return this.lockedPath?.t ?? null;
+  }
+
+  /** Scrub a locked path to `t` seconds and hold there (a timeline drag); `play()` resumes. */
+  scrub(t: number) {
+    const l = this.lockedPath;
+    if (!l) return;
+    l.t = t;
+    l.paused = true;
+  }
+
+  play(speed?: number) {
+    const l = this.lockedPath;
+    if (!l) return;
+    l.paused = false;
+    if (speed !== undefined) l.speed = speed;
+  }
+
   /** Camera forward on the XZ plane (for movement relative to the view). */
   forwardXZ(out = new THREE.Vector3()): THREE.Vector3 {
     return out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -180,6 +230,28 @@ export class CameraRig {
       o.t = Math.min(1, o.t + (dt * 1000) / o.ms);
       this.yaw = o.from + o.by * smoothstep(o.t);
       if (o.t >= 1) this.orbit = null;
+    }
+
+    // Locked shot: the path owns the camera; look input still steers the free camera underneath for the hand-back.
+    const lock = this.lockedPath;
+    if (lock && this.mode !== 'actor') {
+      if (!lock.paused) {
+        lock.t += dt * lock.speed;
+        const end = lock.path.startS + lock.path.durationS;
+        if (lock.t > end) {
+          if (lock.loop && lock.path.durationS > 0) lock.t = lock.path.startS + ((lock.t - lock.path.startS) % lock.path.durationS);
+          else {
+            lock.path.apply(camera, end);
+            this.unlock();
+            this.yaw = yawFromCamera(camera);
+            return;
+          }
+        }
+      }
+      lock.path.apply(camera, lock.t);
+      this.yaw = yawFromCamera(camera);
+      this.smoothed.copy(camera.position);
+      return;
     }
 
     this.yaw -= look.yaw;
@@ -230,4 +302,10 @@ export class CameraRig {
     camera.lookAt(this.tmpLook);
     if (this.roll !== 0) camera.rotateZ(this.roll);
   }
+}
+
+/** Rig yaw (Y rotation of the view direction) from a camera's orientation — so a hand-back from a path faces the same way. */
+function yawFromCamera(camera: THREE.Camera): number {
+  const d = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  return Math.atan2(-d.x, -d.z);
 }

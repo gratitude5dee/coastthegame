@@ -49,6 +49,20 @@ tools for that act and comes back.
 Shots tween the rig (distance, height, field of view) without changing mode; a dutch rolls the horizon and the next
 shot rolls it back; _follow_ re-targets the rig on a prop, the lowrider or an NPC and _follow me_ brings it home.
 
+### Keyframed paths (CAM-7)
+
+| Say                                                                   | Act                                                                        |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| _set a key_ · _keyframe_ · _drop a key here_                          | `camera { path: key }` — the camera as it stands, timed from the first key |
+| _play the path_ · _fly the path in 8 seconds_ · _run the path looped_ | `camera { path: play, path_seconds?, loop? }` — the locked shot            |
+| _free camera_ · _release the camera_ · _stop the path_                | `camera { path: stop }`                                                    |
+| _clear the path_ · _forget the keys_                                  | `camera { path: clear }`                                                   |
+| _drop the last key_                                                   | `camera { path: undo_key }`                                                |
+
+Two keys make a path (a centripetal Catmull-Rom through the positions, slerped orientation, lerped lens, eased per
+segment). While it plays the rig rides it and hands the camera back at the last key; with two keys or more the path
+also drives the **cut export** instead of a take's recorded camera.
+
 ## Light & weather (director, producer)
 
 | Say                                                     | Act                          |

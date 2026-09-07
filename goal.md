@@ -462,7 +462,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 - [ ] **Gates:** QB-1/2/3 on desktop, Quest 3, iPhone (real-device `/perf` reports attached). (QB-4 moves to M3.5.)
 
 ### M3.5 — Vertical slice (target: 1 week) — the partner demo; the exact ID list is the scope
-- [~] CAM-1, CAM-2 (over-shoulder + orbit) ✓, CAM-3 VR diorama ✓ (pick/place write-back pending); QB-4 gate needs the device reports.
+- [~] CAM-1, CAM-2 (over-shoulder + orbit + locked shot on a keyframed path) ✓, CAM-3 VR diorama ✓ (pick/place write-back pending); QB-4 gate needs the device reports.
 - [x] ACT-1, ACT-2 (record/replay: root poses, world edits, moving props; bone tracks with the rigs), STU-1 (beauty, fixed-step), STU-3 (video-only MP4 export via WebCodecs + Mediabunny, R2 upload + share page; server mux pending).
 - [x] The **Photographer** NPC (placeholder rig) hands out **two hard-coded missions** (SCH-3) with the shot meter (MIS-2) and verdict (MIS-3); the billboard replays the take; the reel (MIS-4) fills bar by bar.
 - [x] Put-that-there via **mouse/touch fallback** (click object → click place) with ghost preview + undo; the typed `/` bar and browser push-to-talk drive the same acts ahead of M5 (ADR-0006).
@@ -475,7 +475,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 - [x] Possess / record / replay (ACT-1…4) with multi-take blocking (the set), possession by V / voice, world-edit replay for props; tags persist in the world rather than repaint (ADR-0007).
 
 ### M5 — Director mode & voice (target: 1.5 weeks)
-- [~] CameraRig CAM-3 (VR diorama) ✓, CAM-6 (shots, moves, lenses, follow / look at by direction) ✓, CAM-7 keyframed paths pending, CAM-8 role partition ✓ (tools per mode).
+- [~] CameraRig CAM-3 (VR diorama) ✓, CAM-6 (shots, moves, lenses, follow / look at by direction) ✓, CAM-7 keyframed paths ✓ (own centripetal Catmull-Rom, time-keyed, scrubbable; the locked shot of CAM-2; drives the export) — a timeline UI pending, CAM-8 role partition ✓ (tools per mode).
 - [~] Realtime voice via WebRTC with ephemeral secrets and VAD speech windows (DIR-1) — client + Worker built, live once the key lands; mode-gated tool schema (DIR-2) ✓; deixis resolver fixtures (SCH-6) — 17 cases today, ≥60 pending; ghost preview + undo ✓; `FakeRealtime` transcript replay in CI (DIR-6) ✓.
 - [~] `docs/director-grammar.md` ✓ (the vocabulary as tables, mirrored by `tests/unit/grammar.test.ts`) + a **nightly** e2e voice suite: 10 TTS-generated utterances against the real API → expected acts; ≥9/10 — pending the key.
 - [ ] Astra planner (DIR-5): mission brief → shot list JSON; **12 missions authored by the planner and approved by GRATITUD3** (MIS-5).

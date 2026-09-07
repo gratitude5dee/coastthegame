@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { SparkRenderer, SparkXr, SplatMesh } from '@sparkjsdev/spark';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
+  CameraPath,
   CameraRig,
   CharacterController,
   Lowrider,
@@ -150,6 +151,8 @@ declare global {
       summary: string;
       follow: string | null;
       shot: { distance: number; height: number; fovDeg: number };
+      /** The keyframed camera path (CAM-7): keys, length, whether the rig rides it right now and where. */
+      path: { keys: number; durationS: number; locked: boolean; t: number | null };
     };
     __coastSay?: (text: string) => UtteranceOutcome;
     __coastVoice?: { supported: boolean; state: string };
@@ -286,6 +289,9 @@ export class Game {
   private readonly deixis = new DeixisBuffer();
   /** What the follow camera is on when it is not the player: 'lowrider', a prop id or an NPC id (CAM-6 "follow the car"). */
   private followId: string | null = null;
+  /** The director's keyframed camera path (CAM-7): keys dropped where the camera was, played as a locked shot. */
+  private readonly cameraPath = new CameraPath();
+  private pathStartedAt = 0;
   private typing = false;
   /** Push-to-talk speech recognition feeding the console (browser Web Speech; the Realtime client replaces it in M5). */
   private voice: VoiceInput | null = null;
@@ -1380,12 +1386,14 @@ export class Game {
       this.props?.setPose(id, pose.pos, pose.quat);
     };
     // Cut export (STU-3): the session borrows the renderer; the live loop pauses and the live body hides meanwhile.
+    // A keyframed camera path with two keys or more drives the picture instead of a take's camera (CAM-7).
     studio.exportScene = () => ({
       renderer: this.renderer,
       scene: this.scene,
       camera: this.camera,
       begin: () => {
         this.exporting = true;
+        this.rig.unlock();
         this.renderer.setAnimationLoop(null);
         this.playerMesh.visible = false;
         this.props?.select(null);
@@ -1398,6 +1406,7 @@ export class Game {
         this.updateHint();
       },
     });
+    this.syncCameraPath();
     window.__coastExport = async (opts) => {
       const r = await studio.exportCut(opts ?? {});
       return { bytes: r.blob.size, mime: r.mime, codec: r.codec, ext: r.ext, frames: r.frames, seconds: r.seconds, manifest: r.manifest };
@@ -1820,6 +1829,58 @@ export class Game {
     } else framePositionForHead(feet, yaw, this.headLocal, this.localFrame.position);
   }
 
+  /**
+   * The keyframed path (CAM-7): a key is the camera as it stands, timed from the first key (at least half a second
+   * after the last); `play` locks the rig to the path (re-timed to `seconds` when given) until its end.
+   */
+  private cameraPathOp(op: NonNullable<CameraRequest['path']>, seconds?: number, loop?: boolean): boolean {
+    const ok = this.cameraPathEdit(op, seconds, loop);
+    this.syncCameraPath();
+    this.syncDirectorHook();
+    return ok;
+  }
+
+  /** The studio exports through the path once it has two keys (CAM-7). */
+  private syncCameraPath() {
+    if (this.studio) this.studio.cameraPath = this.cameraPath.size >= 2 ? this.cameraPath.toJSON() : null;
+  }
+
+  private cameraPathEdit(op: NonNullable<CameraRequest['path']>, seconds?: number, loop?: boolean): boolean {
+    const path = this.cameraPath;
+    const now = performance.now();
+    switch (op) {
+      case 'key': {
+        if (path.size === 0) this.pathStartedAt = now;
+        const last = path.keys[path.size - 1];
+        const t = last ? Math.max(last.t + 0.5, (now - this.pathStartedAt) / 1000) : 0;
+        path.addFromCamera(this.camera, t);
+        this.subtitles?.say('Director', `key ${path.size} · ${t.toFixed(1)} s`, 2000);
+        return true;
+      }
+      case 'play': {
+        if (path.size < 2) {
+          this.subtitles?.say('Director', 'two keys make a path — set another', 2500);
+          return false;
+        }
+        if (seconds && seconds > 0) path.retime(seconds);
+        this.followId = null;
+        const ok = this.rig.lock(path, { loop: loop ?? false });
+        if (ok) performance.mark('coast:path-play');
+        return ok;
+      }
+      case 'stop':
+        if (!this.rig.locked) return false;
+        this.rig.unlock();
+        return true;
+      case 'clear':
+        path.clear();
+        this.rig.unlock();
+        return true;
+      case 'undo_key':
+        return path.removeLast() !== undefined;
+    }
+  }
+
   /** Ghost preview while a prop is selected (DIR-3), following the pointer or the crosshair. */
   private updatePointer() {
     const props = this.props;
@@ -2086,6 +2147,7 @@ export class Game {
           summary: result.ok ? `✓ ${env.act.op}` : `✗ ${result.error ?? result.question ?? env.act.op}`,
           follow: this.followId,
           shot: { distance: this.rig.params.distance, height: this.rig.params.height, fovDeg: this.rig.params.fovDeg },
+          path: { keys: this.cameraPath.size, durationS: this.cameraPath.durationS, locked: this.rig.locked, t: this.rig.pathTime },
         };
         this.updateHint();
       },
@@ -2132,6 +2194,7 @@ export class Game {
       summary: outcome ? summarize(outcome) : (prev?.summary ?? ''),
       follow: this.followId,
       shot: { distance: this.rig.params.distance, height: this.rig.params.height, fovDeg: this.rig.params.fovDeg },
+      path: { keys: this.cameraPath.size, durationS: this.cameraPath.durationS, locked: this.rig.locked, t: this.rig.pathTime },
     };
   }
 
@@ -2389,6 +2452,7 @@ export class Game {
         if (req.shot) ok = this.rig.applyShot(req.shot) || ok;
         if (req.move) ok = this.rig.move(req.move, req.durationMs ?? 1500) || ok;
         if (req.lensMm !== undefined) ok = this.rig.lens(req.lensMm) || ok;
+        if (req.path) ok = this.cameraPathOp(req.path, req.pathSeconds, req.loop) || ok;
         if (req.lookAtId) {
           const subject = feetOf(this.followId ?? 'me');
           const target = feetOf(req.lookAtId);

@@ -7,7 +7,7 @@
 import type { DeixisBuffer } from '@coast/engine';
 import { resolveObject, resolvePlace, type ResolveContext, type SceneIndex, type SpeechWindow } from './deixis';
 import { parseUtterance, type Meta, type Utterance } from './grammar';
-import type { ActEnvelope, ActResult, CameraMove, ObjectRef, RigMode, SceneAct, ShotName } from './schema';
+import type { ActEnvelope, ActResult, CameraMove, ObjectRef, RigMode, SceneAct, ShotName, CameraPathOp } from './schema';
 
 export type TimePresetName = 'noon' | 'golden' | 'blue' | 'night' | 'fog_noon';
 export type WeatherKind = 'fog' | 'clear' | 'rain';
@@ -19,6 +19,10 @@ export interface CameraRequest {
   move?: CameraMove;
   durationMs?: number;
   lensMm?: number;
+  /** Keyframed path op (CAM-7). */
+  path?: CameraPathOp;
+  pathSeconds?: number;
+  loop?: boolean;
 }
 
 /** What the game exposes to the director. Every mutator returns whether it happened (false = not possible here). */
@@ -327,6 +331,9 @@ export class ActExecutor {
         if (act.move) req.move = act.move;
         if (act.duration_ms !== undefined) req.durationMs = act.duration_ms;
         if (act.lens_mm !== undefined) req.lensMm = act.lens_mm;
+        if (act.path) req.path = act.path;
+        if (act.path_seconds !== undefined) req.pathSeconds = act.path_seconds;
+        if (act.loop !== undefined) req.loop = act.loop;
         if (act.follow) {
           const f = this.ref(act.follow, ctx);
           if (!f.id) return f.result!;

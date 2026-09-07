@@ -165,6 +165,23 @@ export function parseUtterance(text: string): Utterance {
     } else if ((m = /^(?:camera |cam |lens )?(\d{2,3}) ?mm(?: lens)?$/.exec(c))) {
       acts.push({ op: 'camera', lens_mm: Number(m[1]) });
     }
+    // ── keyframed paths (CAM-7) ──
+    else if (/^(?:set|drop|add|mark) (?:a )?(?:key|keyframe|key ?frame|camera key)(?: here)?$|^(?:key|keyframe)(?: here)?$/.test(c)) {
+      acts.push({ op: 'camera', path: 'key' });
+    } else if (
+      (m =
+        /^(?:play|run|fly|roll) (?:the )?(?:path|camera path|move)(?: in (\d+(?:\.\d+)?) ?(?:s|sec|seconds?))?( looped| on a loop| looping)?$/.exec(
+          c,
+        ))
+    ) {
+      acts.push({ op: 'camera', path: 'play', ...(m[1] ? { path_seconds: Number(m[1]) } : {}), ...(m[2] ? { loop: true } : {}) });
+    } else if (/^(?:stop|release|unlock|free) (?:the )?(?:path|camera|camera path)$|^free cam(?:era)?$/.test(c)) {
+      acts.push({ op: 'camera', path: 'stop' });
+    } else if (/^(?:clear|forget|scrap) (?:the )?(?:path|keys|keyframes|camera path)$/.test(c)) {
+      acts.push({ op: 'camera', path: 'clear' });
+    } else if (/^(?:drop|remove|undo|delete) (?:the )?last (?:key|keyframe)$/.test(c)) {
+      acts.push({ op: 'camera', path: 'undo_key' });
+    }
     // ── the world ──
     else if (
       (m = new RegExp(`^(?:put|move|place|drop|set|bring|take|stick) (.+?) ${PLACE_WORDS}$`).exec(c)) &&

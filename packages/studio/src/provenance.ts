@@ -120,6 +120,8 @@ export interface ManifestInput {
   takes: ManifestTakeInput[];
   plan: ManifestPlanInput;
   captions: { length: number };
+  /** What drove the camera when it was not a take's recorded track (a keyframed path, CAM-7): `'path'`. */
+  cameraTake?: string;
   video?: { bytes: number; mime: string; codec: string; sha256?: string };
   level?: { id: string; version: string };
   /** Cells resident at export time (the takes' own cell versions are always included). */
@@ -169,7 +171,7 @@ export function buildCutManifest(i: ManifestInput): CutManifest {
     takeDetails: takes,
     shots: [`${i.id}:shot`],
     shot: {
-      cameraTake: camera?.id ?? '',
+      cameraTake: i.cameraTake ?? camera?.id ?? '',
       fps: i.plan.fps,
       width: i.plan.width,
       height: i.plan.height,
