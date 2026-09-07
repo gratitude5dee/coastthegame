@@ -5,6 +5,71 @@
  */
 import { encodeTake, type CutManifest, type TakeV1 } from '@coast/studio';
 
+export type AvatarProvider = 'tripo' | 'fal-hunyuan' | 'fal-meshy';
+export type AvatarJob = {
+  id: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'unknown';
+  modelUrl?: string;
+  error?: string;
+};
+
+export class AvatarApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AvatarApiError';
+  }
+}
+
+async function avatarResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const messages: Record<number, string> = {
+      400: 'Invalid avatar input.',
+      401: 'An avatar session is required.',
+      402: 'Session budget exhausted. Import a GLB instead.',
+      404: 'Avatar job not found in this session.',
+      409: 'This requestId was already used for different input.',
+      413: 'Avatar request is too large.',
+      429: 'Avatar job limit reached for this session.',
+      503: 'Avatar generation is unavailable. Import a GLB instead. Reuse the same requestId when checking an uncertain submission.',
+    };
+    throw new AvatarApiError(
+      response.status,
+      messages[response.status] ?? 'Avatar request failed. Reuse the same requestId; do not automatically resubmit.',
+    );
+  }
+  return response.json() as Promise<T>;
+}
+
+export async function avatarCapabilities(): Promise<{ providers: Record<AvatarProvider, boolean> }> {
+  return avatarResponse(await fetch('/api/avatar/capabilities', { cache: 'no-store' }));
+}
+
+export async function createAvatarJob(
+  session: string,
+  input: { provider: AvatarProvider; prompt?: string; imageUrl?: string; requestId: string },
+): Promise<AvatarJob> {
+  return avatarResponse(
+    await fetch('/api/jobs/avatar', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-coast-session': session },
+      body: JSON.stringify(input),
+      cache: 'no-store',
+    }),
+  );
+}
+
+export async function getAvatarJob(session: string, id: string): Promise<AvatarJob> {
+  return avatarResponse(
+    await fetch(`/api/jobs/avatar/${encodeURIComponent(id)}`, {
+      headers: { 'x-coast-session': session },
+      cache: 'no-store',
+    }),
+  );
+}
+
 let health: Promise<boolean> | null = null;
 
 /** Whether the API answers (cached for the page's life; a first call at boot costs one request). */

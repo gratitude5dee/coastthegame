@@ -10,6 +10,7 @@
 export interface ManifestTakeInput {
   id: string;
   actorId: string;
+  avatar?: { id: string; name: string; color?: number };
   cellVersion: string;
   durationS: number;
   startedAt: string;
@@ -52,6 +53,7 @@ export interface Provenance {
 export interface ManifestTake {
   id: string;
   actorId: string;
+  avatar?: { id: string; name: string; color?: number };
   cellVersion: string;
   durationS: number;
   startedAt: string;
@@ -145,6 +147,17 @@ export function buildCutManifest(i: ManifestInput): CutManifest {
   const takes = i.takes.map<ManifestTake>((t) => ({
     id: t.id,
     actorId: t.actorId,
+    ...(t.avatar
+      ? {
+          avatar: {
+            id: t.avatar.id,
+            name: t.avatar.name,
+            ...(typeof t.avatar.color === 'number' && Number.isInteger(t.avatar.color) && t.avatar.color >= 0 && t.avatar.color <= 0xffffff
+              ? { color: t.avatar.color }
+              : {}),
+          },
+        }
+      : {}),
     cellVersion: t.cellVersion,
     durationS: Math.round(t.durationS * 1000) / 1000,
     startedAt: t.startedAt,

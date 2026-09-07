@@ -11,6 +11,12 @@ import {
   CameraPath,
   CameraRig,
   CharacterController,
+  createMannequin,
+  loadAvatar,
+  readAvatarBytes,
+  type Avatar,
+  type AvatarAsset,
+  type AvatarReport,
   Lowrider,
   PhysicsWorld,
   PropSystem,
@@ -66,6 +72,8 @@ import {
   unlocksFor,
   unlocksOfKind,
   type MeterSample,
+  type ControlPromptBundle,
+  type PoseSources,
 } from '@coast/studio';
 import { newFrameInput, resetFrameInput, type FrameInput, type InputProvider } from './input/intents';
 import { KeyboardMouseProvider } from './input/keyboardMouse';
@@ -86,6 +94,8 @@ import { connectRealtime, type RealtimeSession } from './director/realtimeWebrtc
 import { createSubtitles, type Subtitles } from './ui/subtitles';
 import { createReelStrip, type ReelStrip } from './ui/reel';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
+import { createAvatarCard, nameOfUrl, type AvatarCard } from './ui/avatarCard';
+import { avatarStore, describeAvatar, type AvatarDescriptor } from './avatarStore';
 import {
   LEVELS,
   LOCAL_BUTTERFLY,
@@ -150,6 +160,8 @@ export interface GameOptions {
 
 declare global {
   interface Window {
+    __coastAvatar?: () => { id: string; name: string; report: AvatarReport };
+    __coastLoadAvatar?: (url: string, forward?: '-Z' | '+Z') => Promise<AvatarReport>;
     __coastReady?: boolean;
     __coastLod?: boolean;
     __coastFrame?: number;
@@ -184,12 +196,16 @@ declare global {
     __coastExportControl?: (opts?: {
       startS?: number;
       endS?: number;
-      passes?: ('depth' | 'pose')[];
+      passes?: ('beauty' | 'depth' | 'pose')[];
       fps?: number;
       preview?: boolean;
     }) => Promise<{
       passes: Record<string, { bytes: number; mime: string; frames: number; seconds: number }>;
       camera: { frames: number; width: number; height: number; near: number; far: number; first: unknown };
+      hero: { bytes: number; mime: string; width: number; height: number; timeS: number; frame: number; preview?: string };
+      prompts: ControlPromptBundle;
+      poseSources?: PoseSources;
+      package: { bytes: number; mime: string; url: string; files: string[] };
       preview?: Record<string, string>;
     }>;
     /** QA: put the player's feet somewhere (the streaming harness walks the level this way). */
@@ -328,6 +344,16 @@ export class Game {
   private pendingBeat: { event: NonNullable<MeterSample['beatEvent']>; phaseMs: number } | null = null;
   private verdictAt = 0;
   private playerMesh: THREE.Group;
+  private readonly legacyBody: THREE.Group;
+  private readonly mannequin = createMannequin();
+  private readonly avatars = new Map<string, AvatarAsset>([[this.mannequin.id, this.mannequin]]);
+  private readonly avatarLoads = new Map<string, Promise<AvatarAsset>>();
+  private selectedAvatar = this.mannequin;
+  private playerAvatar: Avatar;
+  private activeAvatarId = this.mannequin.id;
+  private avatarCard: AvatarCard | null = null;
+  private avatarImport = 0;
+  private avatarTime = 0;
   private debug = false;
   private physicsReady = false;
   private physicsGen = 0;
@@ -459,8 +485,14 @@ export class Game {
     const nose = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.3), new THREE.MeshStandardMaterial({ color: 0x0b0a10 }));
     nose.position.set(0, 1.45, -0.4);
     this.playerMesh.add(body, nose);
+    this.legacyBody = this.playerMesh;
+    this.playerMesh = new THREE.Group();
+    this.playerAvatar = this.mannequin.instantiate();
+    this.playerMesh.add(this.playerAvatar.group);
     this.playerMesh.visible = false;
     this.world.add(this.playerMesh);
+    window.__coastAvatar = () => ({ id: this.selectedAvatar.id, name: this.selectedAvatar.name, report: this.selectedAvatar.report });
+    window.__coastLoadAvatar = (url, forward = '-Z') => this.importAvatar(url, nameOfUrl(url), forward);
 
     const camParam = params.get('cam') ?? 'director';
     this.rig = new CameraRig(
@@ -514,6 +546,25 @@ export class Game {
         },
       });
       this.syncVoiceHook();
+      this.avatarCard = createAvatarCard(document.body, {
+        sessionId: opts.sessionId,
+        load: (source, name, forward, save) => this.importAvatar(source, name, forward, save),
+        reset: () => this.resetAvatar(),
+        library: {
+          list: () => avatarStore.list(),
+          select: (id) => this.selectSavedAvatar(id),
+          remove: async (id) => {
+            this.assertAvatarChange();
+            this.avatarImport++;
+            await avatarStore.remove(id);
+          },
+        },
+        onOpenChange: (open) => {
+          this.kbm.releaseAll();
+          if (open) this.kbm.setPointerLockDesired(false);
+          else this.kbm.setPointerLockDesired(this.rig.mode === 'actor');
+        },
+      });
       if (params.get('voice') === 'realtime') void this.startRealtime(params.get('premium') === '1');
     }
 
@@ -610,6 +661,154 @@ export class Game {
       await this.loadScene(sceneId, level ?? undefined);
     }
     this.renderer.setAnimationLoop((time) => this.tick(time));
+    const avatarUrl = p.get('avatar');
+    if (avatarUrl) {
+      try {
+        await this.importAvatar(avatarUrl, nameOfUrl(avatarUrl), p.get('avatarForward') === '+Z' ? '+Z' : '-Z');
+      } catch (error) {
+        this.subtitles ??= createSubtitles(document.body);
+        this.subtitles.say('Avatar', error instanceof Error ? error.message : 'Avatar import failed.', 6000);
+      }
+    } else if (!this.isShot) void this.restoreSavedAvatar();
+  }
+
+  private assertAvatarChange() {
+    if (this.studio?.state === 'recording' || this.studio?.exporting || this.exporting)
+      throw new Error('Finish the take or export before changing avatar.');
+    if (this.identity.id !== PLAYER_IDENTITY.id) throw new Error('Return to your own body before changing avatar.');
+    if (this.inXr) throw new Error('Leave XR before importing an avatar.');
+  }
+
+  private async importAvatar(source: ArrayBuffer | string, name: string, forward: '-Z' | '+Z', save = false): Promise<AvatarReport> {
+    this.assertAvatarChange();
+    const generation = ++this.avatarImport;
+    const data = await readAvatarBytes(source);
+    let descriptor: AvatarDescriptor | undefined;
+    const warnings: string[] = [];
+    if (globalThis.crypto?.subtle) descriptor = await describeAvatar(data, name.slice(0, 120), forward);
+    else warnings.push('Stable avatar identities and device saving require HTTPS or localhost.');
+    const id = descriptor?.id ?? `avatar-page-${Date.now()}-${generation}`;
+    if (!this.avatars.has(id) && this.avatars.size + this.avatarLoads.size >= 9)
+      throw new Error(
+        'Eight imported characters are loaded for this page’s takes. Reload to free loaded models; saved models stay on this device.',
+      );
+    const cached = this.avatars.get(id);
+    const pending = this.avatarLoads.get(id);
+    const asset = cached ?? (await (pending ?? loadAvatar(data, { id, name: name.slice(0, 120), forward })));
+    try {
+      if (generation !== this.avatarImport) throw new Error('A newer avatar choice replaced this import.');
+      this.assertAvatarChange();
+      if (save && descriptor) {
+        let stored = false;
+        try {
+          await avatarStore.save({ ...descriptor, data });
+          stored = true;
+          if (generation === this.avatarImport) await avatarStore.select(id);
+          warnings.push('Saved on this device for future takes and replay.');
+        } catch (error) {
+          warnings.push(
+            `${stored ? 'Saved file, but the remembered selection could not be updated' : 'Not saved on this device'}: ${error instanceof Error ? error.message : 'storage unavailable'}. The character works for this page.`,
+          );
+        }
+      } else warnings.push('Page-only character. Any remembered saved character will return on reload.');
+      if (generation !== this.avatarImport) throw new Error('A newer avatar choice replaced this import.');
+      this.assertAvatarChange();
+    } catch (error) {
+      if (!cached && !pending) asset.dispose();
+      throw error;
+    }
+    this.avatars.set(asset.id, asset);
+    this.selectedAvatar = asset;
+    this.syncPlayerAvatar();
+    return { ...asset.report, warnings: [...asset.report.warnings, ...warnings] };
+  }
+
+  private loadSavedAvatar(id: string): Promise<AvatarAsset> {
+    const cached = this.avatars.get(id);
+    if (cached) return Promise.resolve(cached);
+    const pending = this.avatarLoads.get(id);
+    if (pending) return pending;
+    if (this.avatars.size + this.avatarLoads.size >= 9)
+      return Promise.reject(new Error('Loaded avatar limit reached. Reload to free memory before opening another saved character.'));
+    const loading = (async () => {
+      try {
+        const record = await avatarStore.load(id);
+        if (!record)
+          throw new Error('The recorded avatar is not saved on this device. Reimport its original GLB with the same orientation.');
+        const asset = await loadAvatar(record.data, record);
+        this.avatars.set(id, asset);
+        return asset;
+      } finally {
+        this.avatarLoads.delete(id);
+      }
+    })();
+    this.avatarLoads.set(id, loading);
+    return loading;
+  }
+
+  private async selectSavedAvatar(id: string): Promise<AvatarReport> {
+    this.assertAvatarChange();
+    const generation = ++this.avatarImport;
+    const asset = await this.loadSavedAvatar(id);
+    if (generation !== this.avatarImport) throw new Error('A newer avatar choice replaced this selection.');
+    this.assertAvatarChange();
+    await avatarStore.select(id);
+    if (generation !== this.avatarImport) throw new Error('A newer avatar choice replaced this selection.');
+    this.assertAvatarChange();
+    this.selectedAvatar = asset;
+    this.syncPlayerAvatar();
+    return { ...asset.report, warnings: [...asset.report.warnings, 'Loaded from this device.'] };
+  }
+
+  private async resetAvatar() {
+    this.assertAvatarChange();
+    this.avatarImport++;
+    this.selectedAvatar = this.mannequin;
+    this.syncPlayerAvatar();
+    try {
+      await avatarStore.select(null);
+    } catch {
+      this.subtitles ??= createSubtitles(document.body);
+      this.subtitles.say('Avatar', 'Mannequin is active for this page, but the remembered device selection could not be cleared.', 6000);
+    }
+  }
+
+  private async restoreSavedAvatar() {
+    const generation = this.avatarImport;
+    try {
+      const id = await avatarStore.selected();
+      if (!id || generation !== this.avatarImport) return;
+      await this.selectSavedAvatar(id);
+    } catch (error) {
+      if (generation !== this.avatarImport && this.selectedAvatar !== this.mannequin) return;
+      this.subtitles ??= createSubtitles(document.body);
+      this.subtitles.say(
+        'Avatar',
+        error instanceof Error ? error.message : 'Saved character unavailable; the mannequin remains playable.',
+        6000,
+      );
+    }
+  }
+
+  private playerTint(): number {
+    return this.loadout.outfit ? (unlocksOfKind([this.loadout.outfit], 'outfit')[0]?.color ?? 0xffffff) : 0xffffff;
+  }
+
+  private syncPlayerAvatar() {
+    const player = this.identity.id === PLAYER_IDENTITY.id;
+    const asset = player ? this.selectedAvatar : this.mannequin;
+    if (this.activeAvatarId !== asset.id) {
+      this.playerAvatar.dispose();
+      this.playerAvatar = asset.instantiate();
+      this.activeAvatarId = asset.id;
+      this.playerMesh.add(this.playerAvatar.group);
+    }
+    const color = player ? this.playerTint() : this.identity.color;
+    this.playerAvatar.setTint(color);
+    const name = player ? (this.selectedAvatar === this.mannequin ? PLAYER_IDENTITY.name : asset.name) : this.identity.name;
+    this.looks.set(this.identity.id, { name, color });
+    this.avatarCard?.setCurrent(name, asset.report);
+    if (this.studio) this.studio.avatar = { id: asset.id, name, color };
   }
 
   // ── Loading ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -1460,6 +1659,10 @@ export class Game {
     const physics = this.physics!;
     this.subtitles ??= createSubtitles(document.body);
     const npcs = new NpcSystem(physics, this.world, (x, z) => this.heightAt(x, z), {
+      avatarFor: (spec) => ({
+        asset: spec.id === PLAYER_IDENTITY.id ? this.selectedAvatar : this.mannequin,
+        color: spec.id === PLAYER_IDENTITY.id ? this.playerTint() : spec.color,
+      }),
       onGreet: (npc, line) => {
         this.subtitles?.say(npc.spec.name, line);
         this.tts.say(npc.spec.id, line);
@@ -1517,18 +1720,26 @@ export class Game {
       this.cellId ?? this.currentSceneId,
       undefined,
       missionParam > 0 ? missionParam - 1 : 0,
-      (actorId) =>
-        new GhostActor(
+      (actorId, avatar) => {
+        const asset = avatar ? this.avatars.get(avatar.id) : undefined;
+        if (avatar && !asset)
+          throw new Error(`“${avatar.name}” was imported in another page session. Its model is unavailable for replay.`);
+        return new GhostActor(
           this.world,
-          this.playerMesh,
+          this.legacyBody,
           this.vehicle?.group ?? null,
-          this.looks.get(actorId) ?? { color: 0x9be34a, name: actorId },
+          avatar ? { name: avatar.name, color: avatar.color ?? 0xffffff } : (this.looks.get(actorId) ?? { color: 0x9be34a, name: actorId }),
           CAR_FEET_DROP,
-        ),
+          asset,
+        );
+      },
     );
     studio.onClip = (url) => this.showClip(url);
     studio.actorId = this.identity.id;
     studio.sessionId = this.opts.sessionId;
+    studio.prepareAvatar = async (avatar) => {
+      await this.loadSavedAvatar(avatar.id);
+    };
     // The reel (MIS-4): persisted per browser; the strip redraws on every verdict / export.
     try {
       studio.reel.restore(JSON.parse(localStorage.getItem('coast:reel') ?? 'null'));
@@ -1536,12 +1747,18 @@ export class Game {
       /* no saved reel */
     }
     this.reelStrip ??= createReelStrip(document.body, (missionId) => {
-      void this.studio?.reviewMission(missionId).then((ok) => {
-        if (ok) {
+      void this.studio
+        ?.reviewMission(missionId)
+        .then((ok) => {
+          if (ok) {
+            this.subtitles ??= createSubtitles(document.body);
+            this.subtitles.say('Reel', `${this.studio?.reel.entry(missionId)?.title ?? missionId} — best take · P stops`, 3000);
+          }
+        })
+        .catch((error: unknown) => {
           this.subtitles ??= createSubtitles(document.body);
-          this.subtitles.say('Reel', `${this.studio?.reel.entry(missionId)?.title ?? missionId} — best take · P stops`, 3000);
-        }
-      });
+          this.subtitles.say('Avatar', error instanceof Error ? error.message : 'The recorded avatar is unavailable.', 6000);
+        });
     });
     studio.onReel = (reel) => {
       try {
@@ -1612,6 +1829,7 @@ export class Game {
         this.updateHint();
       },
     });
+    studio.controlContext = () => ({ cell: this.currentSceneId, timePreset: this.timePreset, look: this.lookName });
     studio.onLook = (look) => {
       if (!this.setLook(look)) console.warn(`mission look "${look}" is not a look the engine knows`);
     };
@@ -1625,11 +1843,24 @@ export class Game {
       (this.npcs?.npcs ?? []).map((n) => ({
         feet: [n.mesh.position.x, n.mesh.position.y, n.mesh.position.z] as [number, number, number],
         yaw: n.mesh.rotation.y,
+        rigJoints: n.avatar?.boneWorldPositions(),
       }));
     window.__coastExportControl = async (opts = {}) => {
       const { fps, ...span } = opts;
       const r = await studio.exportControl({ ...span, ...(fps ? { cut: { fps } } : {}) });
+      if (studio.lastControlUrl) URL.revokeObjectURL(studio.lastControlUrl);
+      studio.lastControlUrl = URL.createObjectURL(r.package.blob);
+      const { blob: heroBlob, ...hero } = r.hero;
       return {
+        hero: { ...hero, bytes: heroBlob.size },
+        prompts: r.prompts,
+        ...(r.poseSources ? { poseSources: r.poseSources } : {}),
+        package: {
+          bytes: r.package.blob.size,
+          mime: r.package.blob.type,
+          url: studio.lastControlUrl,
+          files: r.package.manifest.files.map((file) => file.name),
+        },
         ...(r.preview ? { preview: r.preview as Record<string, string> } : {}),
         passes: Object.fromEntries(
           Object.entries(r.passes).map(([k, v]) => [k, { bytes: v.blob.size, mime: v.mime, frames: v.frames, seconds: v.seconds }]),
@@ -1645,6 +1876,7 @@ export class Game {
       };
     };
     this.studio = studio;
+    this.syncPlayerAvatar();
     if (missionParam > 0) studio.brief(); // QA: `?mission=n` auto-briefs mission n
   }
 
@@ -1691,10 +1923,12 @@ export class Game {
     if (this.atmosphere.tweening) for (const road of this.corridors.values()) road.setFogColor(this.atmosphere.fogColorHex);
     if (this.isShot) {
       if (this.splat) this.splat.rotation.y = this.freezeT * 0.5; // deterministic pose for screenshots
-    } else {
+    } else if (!this.studio?.exporting) {
       this.pollInput(dt);
       this.handleEdges();
       this.simulate(dt);
+      if (!this.diorama) this.avatarTime += dt;
+      this.playerAvatar.sample(this.avatarTime, this.character?.speed ?? 0, this.character?.grounded ?? true);
       this.updateCamera(dt);
       this.updatePointer();
       this.feedDeixis();
@@ -1828,11 +2062,9 @@ export class Game {
   private applyLoadout() {
     const outfit = this.loadout.outfit ? unlocksOfKind([this.loadout.outfit], 'outfit')[0] : undefined;
     const color = outfit?.color ?? PLAYER_IDENTITY.color;
-    if (this.identity.id === PLAYER_IDENTITY.id) {
-      const body = this.playerMesh.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
-      body?.material.color.setHex(color);
-    }
     this.looks.set(PLAYER_IDENTITY.id, { color, name: PLAYER_IDENTITY.name });
+    this.npcs?.byId(PLAYER_IDENTITY.id)?.avatar?.setTint(this.playerTint());
+    this.syncPlayerAvatar();
     const pattern = this.loadout.pattern ? unlocksOfKind([this.loadout.pattern], 'pattern')[0] : undefined;
     this.hopSequence = pattern ? [...pattern.sequence] : [...CLASSIC_PATTERN];
   }
@@ -1870,10 +2102,16 @@ export class Game {
   private pollInput(dt: number) {
     resetFrameInput(this.input);
     for (const p of this.providers) p.poll(dt, this.input);
+    if (this.avatarCard && !this.avatarCard.el.hidden) resetFrameInput(this.input);
   }
 
   private handleEdges() {
     const i = this.input;
+    if (i.avatar) {
+      this.avatarCard?.open();
+      resetFrameInput(i);
+      return;
+    }
     if (i.sceneKey) {
       const id = SCENE_ORDER[i.sceneKey - 1];
       if (id) void this.loadScene(id);
@@ -2438,8 +2676,7 @@ export class Game {
   /** Wear an identity: the placeholder's colour and the take recorder's actor id follow it. */
   private setIdentity(spec: NpcSpec) {
     this.identity = spec;
-    const body = this.playerMesh.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
-    body?.material.color.setHex(spec.color);
+    this.syncPlayerAvatar();
     if (this.studio) this.studio.actorId = spec.id;
   }
 

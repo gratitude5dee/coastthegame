@@ -21,6 +21,7 @@ export interface FrameInput {
   undo: boolean; // edge
   modeCycle: boolean; // edge
   timeCycle: boolean; // edge
+  avatar: boolean;
   debugToggle: boolean; // edge
   resetEdge: boolean; // edge
   action: boolean; // edge — Enter / ACTION button: roll or cut a take
@@ -62,6 +63,7 @@ export function newFrameInput(): FrameInput {
     undo: false,
     modeCycle: false,
     timeCycle: false,
+    avatar: false,
     debugToggle: false,
     resetEdge: false,
     action: false,
@@ -96,6 +98,7 @@ export function resetFrameInput(f: FrameInput) {
     f.undo =
     f.modeCycle =
     f.timeCycle =
+    f.avatar =
     f.debugToggle =
     f.resetEdge =
     f.action =

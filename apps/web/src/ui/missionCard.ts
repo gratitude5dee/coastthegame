@@ -25,6 +25,8 @@ export interface MissionCard {
       onPlayback?: () => void;
       onExport?: () => void;
       onExportPortrait?: () => void;
+      onExportControl?: (span: { startS: number; endS: number }) => void;
+      controlDurationS?: number;
       /** Progression (MIS-4): what this verdict unlocked, and what the next star brings. */
       unlocked?: string[];
       nextUnlock?: string;
@@ -34,6 +36,9 @@ export interface MissionCard {
   exportProgress(done: number, total: number): void;
   exportReady(url: string, name: string): void;
   exportFailed(message: string): void;
+  controlProgress(done: number, total: number): void;
+  controlReady(url: string, name: string): void;
+  controlFailed(message: string): void;
   /** The cut is online: a share link next to the download. */
   exportShared(url: string): void;
   /** Override the idle state line (e.g. the tutor's example command). Cleared by the next `brief()`. */
@@ -70,6 +75,12 @@ const CSS = `
 .mc-state[data-rec="1"] .mc-dot{display:inline-block;animation:mc-blink 1s steps(2,start) infinite}
 .mc-verdict{margin-top:10px;padding-top:10px;border-top:1px solid rgba(242,236,220,.12)}
 .mc-verdict[hidden]{display:none}
+.mc[data-view="verdict"]{overflow-y:auto;pointer-events:auto;overscroll-behavior:contain}
+.mc-control{display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin-top:12px}
+.mc-control label{display:flex;flex-direction:column;gap:3px;font-size:11px}
+.mc-control input{box-sizing:border-box;width:72px;min-height:44px;padding:4px 6px;border:1px solid rgba(242,236,220,.25);border-radius:6px;background:rgba(242,236,220,.06);color:#f2ecdc;font:12px system-ui;pointer-events:auto;user-select:text;-webkit-user-select:text}
+.mc-control input:disabled{opacity:.4}
+.mc-control-status{flex-basis:100%;overflow-wrap:anywhere;font-size:11px}
 .mc-stars{font-size:26px;line-height:1;letter-spacing:.12em;color:rgba(242,236,220,.22)}
 .mc-stars .on{color:#ffb54a;text-shadow:0 0 12px rgba(255,181,74,.45)}
 .mc-aes{margin-top:4px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(242,236,220,.5)}
@@ -187,6 +198,46 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
   let mission: Mission | undefined;
   let chipList: Chip[] = [];
   let exportBtn: HTMLButtonElement | null = null;
+  let controlBtn: HTMLButtonElement | null = null;
+  let controlStatus: HTMLElement | null = null;
+  let controlArea: HTMLElement | null = null;
+  let controlBusy = false;
+  const controlDisabled = new Map<HTMLButtonElement | HTMLInputElement, boolean>();
+
+  function beginControl() {
+    if (controlBusy || !controlBtn) return;
+    controlBusy = true;
+    controlArea?.setAttribute('aria-busy', 'true');
+    for (const input of verdictEl.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
+      controlDisabled.set(input, input.disabled);
+      input.disabled = true;
+    }
+  }
+
+  function finishControl() {
+    for (const [input, disabled] of controlDisabled) input.disabled = disabled;
+    controlDisabled.clear();
+    controlBusy = false;
+    controlArea?.setAttribute('aria-busy', 'false');
+  }
+
+  function resetControl() {
+    finishControl();
+    controlBtn = null;
+    controlStatus = null;
+    controlArea = null;
+  }
+
+  verdictEl.addEventListener(
+    'click',
+    (event) => {
+      if (controlBusy && event.target instanceof Element && event.target.closest('button')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    },
+    true,
+  );
   let idleStatus = IDLE_STATUS;
   let takesUsed = 0;
   let takesMax = 3;
@@ -245,6 +296,7 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
   const card: MissionCard = {
     el,
     brief(m) {
+      resetControl();
       mission = m;
       idleStatus = IDLE_STATUS;
       title.replaceChildren(h('span', 'mc-kicker', 'Mission'), h('span', 'mc-sep', '·'), h('span', 'mc-name', m.title));
@@ -259,6 +311,7 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
     },
     update(results, elapsedS, recording, used, max) {
       if (el.dataset.view !== 'meter') {
+        resetControl();
         el.dataset.view = 'meter';
         verdictEl.hidden = true;
         verdictEl.replaceChildren();
@@ -270,6 +323,7 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
       el.hidden = false;
     },
     verdict(v, opts = {}) {
+      resetControl();
       paintChips(v.results);
       el.dataset.view = 'verdict';
       setState('CUT — verdict');
@@ -340,6 +394,59 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
         verdictEl.append(u);
       }
       verdictEl.append(actions);
+      if (opts.onExportControl) {
+        const duration = opts.controlDurationS ?? 5;
+        const max = Number.isFinite(duration) && duration > 0 ? duration : 0;
+        const area = h('div', 'mc-control');
+        controlArea = area;
+        const input = (text: string, name: string, value: number) => {
+          const label = h('label', '', text);
+          const field = h('input', '');
+          field.type = 'number';
+          field.name = name;
+          field.min = '0';
+          field.max = String(max);
+          field.step = 'any';
+          field.value = String(value);
+          field.required = true;
+          field.addEventListener('keydown', (event) => event.stopPropagation());
+          label.append(field);
+          area.append(label);
+          return field;
+        };
+        const start = input('Start (s)', 'control-start', 0);
+        const end = input('End (s)', 'control-end', Math.min(5, max));
+        const button = h('button', 'mc-btn', 'Control package');
+        button.type = 'button';
+        button.dataset.act = 'export-control';
+        controlBtn = button;
+        const status = h('div', 'mc-control-status', 'Choose up to 5 seconds. Local export; no upload.');
+        status.setAttribute('role', 'status');
+        controlStatus = status;
+        button.addEventListener('click', () => {
+          if (controlBusy) return;
+          const startS = start.valueAsNumber;
+          const endS = end.valueAsNumber;
+          const valid =
+            Number.isFinite(startS) && Number.isFinite(endS) && startS >= 0 && endS > startS && endS <= max && endS - startS <= 5;
+          start.setAttribute('aria-invalid', String(!valid));
+          end.setAttribute('aria-invalid', String(!valid));
+          if (!valid) {
+            status.textContent = `Choose a valid start and end within 0–${max} s, with a span of at most 5 seconds.`;
+            return;
+          }
+          area.querySelector('[data-act="download-control"]')?.remove();
+          beginControl();
+          status.textContent = 'Preparing control package';
+          try {
+            opts.onExportControl?.({ startS, endS });
+          } catch (error) {
+            card.controlFailed(error instanceof Error ? error.message : String(error));
+          }
+        });
+        area.append(button, status);
+        verdictEl.append(area);
+      }
       verdictEl.hidden = false;
       el.hidden = false;
     },
@@ -365,6 +472,27 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
       if (!exportBtn) return;
       exportBtn.disabled = false;
       exportBtn.textContent = `Cut → MP4 (${message})`;
+    },
+    controlProgress(done, total) {
+      if (!controlBtn || !controlStatus) return;
+      beginControl();
+      controlStatus.textContent = `Control package: rendering ${done} / ${total}`;
+    },
+    controlReady(url, name) {
+      if (!controlBtn || !controlStatus || !controlArea) return;
+      finishControl();
+      controlStatus.textContent = 'Control package ready';
+      controlArea.querySelector('[data-act="download-control"]')?.remove();
+      const dl = h('a', 'mc-btn', 'Download .tar');
+      dl.dataset.act = 'download-control';
+      dl.href = url;
+      dl.download = name;
+      controlArea.append(dl);
+    },
+    controlFailed(message) {
+      if (!controlBtn || !controlStatus) return;
+      finishControl();
+      controlStatus.textContent = `Control package failed: ${message}`;
     },
     exportShared(url) {
       const actions = verdictEl.querySelector('.mc-actions');

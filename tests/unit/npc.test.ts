@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
+import { AvatarAsset } from '../../packages/engine/src/actors/avatar';
+import type { NpcSpec } from '../../apps/web/src/npc/npcs';
 import * as THREE from 'three';
 import { NpcBrain } from '../../packages/engine/src/npc/brain';
 import { NpcNav } from '../../packages/engine/src/npc/crowd';
@@ -126,6 +128,9 @@ describe('NpcSystem possession (ACT-3)', () => {
     // … and the NPC entity carries on as $COAST from where I stood, facing my way, with a fresh brain that does not tutor.
     expect(photographer.spec.id).toBe('player');
     expect(photographer.spec.name).toBe('$COAST');
+    expect(photographer.mesh.name).toBe('player');
+    expect(photographer.avatar).toBeUndefined();
+    expect(photographer.capsule.visible).toBe(true);
     expect(photographer.capsule.material.color.getHex()).toBe(0xffb54a);
     expect(photographer.mesh.position.x).toBeCloseTo(0);
     expect(photographer.mesh.rotation.y).toBeCloseTo(1.2);
@@ -141,6 +146,183 @@ describe('NpcSystem possession (ACT-3)', () => {
     expect(npcs.byId('photographer')).toBe(photographer);
     expect(photographer.brain.opts.approaches).toBe(true);
     expect(photographer.mesh.position.x).toBeCloseTo(2);
+    expect(photographer.mesh.name).toBe('photographer');
+    const capsuleGeometry = vi.spyOn(photographer.capsule.geometry, 'dispose');
+    const capsuleMaterial = vi.spyOn(photographer.capsule.material, 'dispose');
+    const nose = photographer.mesh.children[1] as THREE.Mesh;
+    const noseGeometry = vi.spyOn(nose.geometry, 'dispose');
+    const noseMaterial = vi.spyOn(nose.material as THREE.Material, 'dispose');
     npcs.dispose();
+    expect(capsuleGeometry).toHaveBeenCalledTimes(1);
+    expect(capsuleMaterial).toHaveBeenCalledTimes(1);
+    expect(noseGeometry).toHaveBeenCalledTimes(1);
+    expect(noseMaterial).toHaveBeenCalledTimes(1);
+    physics.dispose();
   }, 30_000);
+});
+
+describe('NpcSystem avatars', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const makeAsset = (id: string) => {
+    const template = new THREE.Group();
+    const geometry = new THREE.BoxGeometry(0.5, 1.8, 0.5);
+    const material = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const model = new THREE.Mesh(geometry, material);
+    model.name = `visual-${id}`;
+    template.add(model);
+    const idle = new THREE.AnimationClip('idle', 2, [new THREE.NumberKeyframeTrack(`${model.name}.rotation[y]`, [0, 2], [0.25, 1.25])]);
+    const walk = new THREE.AnimationClip('walk', 2, [new THREE.NumberKeyframeTrack(`${model.name}.rotation[x]`, [0, 1, 2], [0, 0.5, 0])]);
+    const asset = new AvatarAsset(
+      template,
+      [idle, walk],
+      {
+        boneCount: 0,
+        triangles: 12,
+        heightM: 1.8,
+        clips: ['idle', 'walk'],
+        rig: 'unrigged',
+        warnings: [],
+      },
+      { id, name: id },
+    );
+    return { asset, geometry, material };
+  };
+
+  const spec = (id: string, color = 0xffffff): NpcSpec => ({ id, name: id, color, home: new THREE.Vector3(), lines: [] });
+
+  it('refreshes independent visual identity on possession and disposes instances and placeholders without the shared assets', async () => {
+    const { loadRapier, PhysicsWorld } = await import('../../packages/engine/src/physics/world');
+    const { NpcSystem } = await import('../../apps/web/src/npc/npcs');
+    const physics = new PhysicsWorld(await loadRapier());
+    const mannequin = makeAsset('mannequin');
+    const custom = makeAsset('custom');
+    const live = custom.asset.instantiate();
+    live.setTint(0xff0000);
+    const avatarFor = vi.fn((s: NpcSpec) => (s.id === 'player' ? { asset: custom.asset, color: 0x123456 } : { asset: mannequin.asset }));
+    const world = new THREE.Group();
+    const npcs = new NpcSystem(physics, world, null, { avatarFor });
+    const npc = npcs.spawn(spec('photographer', 0x00ff00));
+    const other = npcs.spawn(spec('extra', 0x0000ff));
+    const old = npc.avatar!;
+    const oldDispose = vi.spyOn(old, 'dispose');
+    expect(old).not.toBe(other.avatar);
+    expect(old.group.parent).toBe(npc.mesh);
+    expect(npc.capsule.visible).toBe(false);
+    const nose = npc.mesh.children[1] as THREE.Mesh;
+    expect(nose.visible).toBe(false);
+    const material = (root: THREE.Object3D, name: string) =>
+      (root.getObjectByName(name) as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    expect(material(old.group, 'visual-mannequin').color.getHex()).toBe(0x00ff00);
+    expect(material(other.avatar!.group, 'visual-mannequin').color.getHex()).toBe(0x0000ff);
+    expect(material(old.group, 'visual-mannequin')).not.toBe(material(other.avatar!.group, 'visual-mannequin'));
+    const sourceDisposals = [mannequin.geometry, mannequin.material, custom.geometry, custom.material].map((resource) =>
+      vi.spyOn(resource, 'dispose'),
+    );
+    const placeholders = [npc.capsule.geometry, npc.capsule.material, nose.geometry, nose.material as THREE.Material].map((resource) =>
+      vi.spyOn(resource, 'dispose'),
+    );
+    const was = npcs.swapIdentity(npc, spec('player'), new THREE.Vector3(2, 0, 1), 0.7);
+    expect(avatarFor).toHaveBeenLastCalledWith(npc.spec);
+    expect(npc.mesh.name).toBe('player');
+    expect(npc.mesh.children).toHaveLength(3);
+    expect(oldDispose).toHaveBeenCalledTimes(1);
+    expect(old.group.parent).toBeNull();
+    expect(npc.avatar!.group.getObjectByName('visual-custom')).toBeDefined();
+    expect(npc.avatar).not.toBe(live);
+    expect(material(npc.avatar!.group, 'visual-custom').color.getHex()).toBe(0x123456);
+    expect(material(live.group, 'visual-custom').color.getHex()).toBe(0xff0000);
+    live.setTint(0xffffff);
+    expect(material(npc.avatar!.group, 'visual-custom').color.getHex()).toBe(0x123456);
+    const playerBody = npc.avatar!;
+    const playerDispose = vi.spyOn(playerBody, 'dispose');
+    npcs.swapIdentity(npc, was.spec, was.position, was.yaw);
+    expect(npc.mesh.name).toBe('photographer');
+    expect(npc.avatar!.group.getObjectByName('visual-mannequin')).toBeDefined();
+    expect(playerDispose).toHaveBeenCalledTimes(1);
+    expect(playerBody.group.parent).toBeNull();
+    for (const dispose of placeholders) expect(dispose).not.toHaveBeenCalled();
+    const finalDispose = vi.spyOn(npc.avatar!, 'dispose');
+    expect(npcs.remove('photographer')).toBe(true);
+    expect(npcs.remove('photographer')).toBe(false);
+    expect(finalDispose).toHaveBeenCalledTimes(1);
+    expect(npc.avatar).toBeUndefined();
+    expect(npc.mesh.parent).toBeNull();
+    for (const dispose of placeholders) expect(dispose).toHaveBeenCalledTimes(1);
+    const otherDispose = vi.spyOn(other.avatar!, 'dispose');
+    npcs.dispose();
+    npcs.dispose();
+    expect(otherDispose).toHaveBeenCalledTimes(1);
+    for (const dispose of sourceDisposals) expect(dispose).not.toHaveBeenCalled();
+    const again = custom.asset.instantiate();
+    again.sample(1, 2, true);
+    again.dispose();
+    live.dispose();
+    custom.asset.dispose();
+    mannequin.asset.dispose();
+    for (const dispose of sourceDisposals) expect(dispose).toHaveBeenCalledTimes(1);
+    physics.dispose();
+  });
+
+  it('initializes idle without navigation and advances only the unpaused simulation clock', async () => {
+    const { loadRapier, PhysicsWorld } = await import('../../packages/engine/src/physics/world');
+    const { NpcSystem } = await import('../../apps/web/src/npc/npcs');
+    const physics = new PhysicsWorld(await loadRapier());
+    const { asset } = makeAsset('idle');
+    const npcs = new NpcSystem(physics, new THREE.Group(), null, { avatarFor: () => ({ asset }) });
+    const npc = npcs.spawn(spec('idle'));
+    const model = npc.avatar!.group.getObjectByName('visual-idle')!;
+    expect(model.rotation.y).toBeCloseTo(0.25);
+    const sample = vi.spyOn(npc.avatar!, 'sample');
+    npcs.update(0.5, new THREE.Vector3());
+    expect(sample).toHaveBeenLastCalledWith(0.5, 0, true);
+    expect(model.rotation.y).toBeCloseTo(0.5);
+    sample.mockClear();
+    npcs.update(20, new THREE.Vector3(), true);
+    expect(sample).not.toHaveBeenCalled();
+    expect(model.rotation.y).toBeCloseTo(0.5);
+    npcs.update(0.25, new THREE.Vector3());
+    expect(sample).toHaveBeenLastCalledWith(0.75, 0, true);
+    npcs.dispose();
+    asset.dispose();
+    physics.dispose();
+  });
+
+  it('samples actual crowd velocity on the accumulated clock and freezes animation and movement when paused', async () => {
+    const { loadRapier, PhysicsWorld } = await import('../../packages/engine/src/physics/world');
+    const { NpcSystem } = await import('../../apps/web/src/npc/npcs');
+    const physics = new PhysicsWorld(await loadRapier());
+    const { asset } = makeAsset('walker');
+    const npcs = new NpcSystem(physics, new THREE.Group(), null, { avatarFor: () => ({ asset }) }, () => 0.5);
+    const grid: GroundGrid = { heights: new Float32Array(41 * 41), cols: 41, rows: 41, minX: -15, minZ: -15, cellSize: 0.75 };
+    const ground = new THREE.Mesh(groundGridGeometry(grid), new THREE.MeshBasicMaterial());
+    await npcs.buildNav([ground]);
+    const npc = npcs.spawn({ ...spec('walker'), speed: 2 });
+    expect(npc.agent).not.toBeNull();
+    const sample = vi.spyOn(npc.avatar!, 'sample');
+    const far = new THREE.Vector3(50, 0, 50);
+    for (let i = 0; i < 360; i++) {
+      npcs.update(1 / 60, far);
+      const velocity = npc.agent!.velocity();
+      expect(sample.mock.lastCall![1]).toBeCloseTo(Math.hypot(velocity.x, velocity.z));
+    }
+    expect(sample.mock.calls.some((call) => call[1] > 0.1)).toBe(true);
+    expect(sample.mock.calls.some((call) => call[1] === 0)).toBe(true);
+    expect(sample.mock.lastCall![0]).toBeCloseTo(6);
+    const position = npc.mesh.position.clone();
+    const model = npc.avatar!.group.getObjectByName('visual-walker')!;
+    const rotation = model.quaternion.clone();
+    sample.mockClear();
+    npcs.update(30, far, true);
+    expect(sample).not.toHaveBeenCalled();
+    expect(npc.mesh.position.equals(position)).toBe(true);
+    expect(model.quaternion.equals(rotation)).toBe(true);
+    npcs.update(0.1, far);
+    expect(sample.mock.lastCall![0]).toBeCloseTo(6.1);
+    npcs.dispose();
+    asset.dispose();
+    ground.geometry.dispose();
+    ground.material.dispose();
+    physics.dispose();
+  });
 });

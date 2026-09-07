@@ -11,8 +11,11 @@ import {
   decodeDepth,
   encodeDepth,
   planControl,
+  poseKeypointsFor,
   projectPoint,
   skeletonFor,
+  type ActorPose,
+  type PoseSources,
 } from '../../packages/studio/src/control';
 import { planCut } from '../../packages/studio/src/export';
 
@@ -30,6 +33,108 @@ describe('control passes (STU-2)', () => {
     expect(small).toMatchObject({ width: 640, height: 360, frameCount: 10 }); // never upscaled
     expect(controlFrameTime(p, 30)).toBe(4);
     expect(planControl(cut, { startS: 5, endS: 5 }).frameCount).toBe(0);
+  });
+
+  it.each([
+    { fps: NaN },
+    { fps: Infinity },
+    { fps: 0 },
+    { fps: 61 },
+    { width: NaN },
+    { height: Infinity },
+    { width: 0 },
+    { height: 1.5 },
+    { startS: NaN },
+    { startS: -1 },
+    { endS: Infinity },
+    { endS: -1 },
+    { frameCount: NaN },
+    { cameraLayer: Infinity },
+  ])('rejects malformed cut inputs: %j', (bad) => {
+    const cut = { ...planCut({ durationS: 20 }), ...bad };
+    expect(() => planControl(cut, { startS: 1, endS: 2 })).toThrow();
+  });
+
+  it.each([
+    { startS: NaN, endS: 2 },
+    { startS: 1, endS: Infinity },
+    { startS: -Infinity, endS: 2 },
+  ])('rejects nonfinite spans: %j', (span) => {
+    expect(() => planControl(planCut({ durationS: 20 }), span)).toThrow();
+  });
+
+  it.each([
+    { maxSeconds: NaN },
+    { maxSeconds: Infinity },
+    { maxSeconds: -1 },
+    { maxShortSide: NaN },
+    { maxShortSide: Infinity },
+    { maxShortSide: -1 },
+    { maxShortSide: 1 },
+    { near: NaN },
+    { near: Infinity },
+    { near: -1 },
+    { far: NaN },
+    { far: Infinity },
+    { near: 1, far: 1 },
+    { near: 2, far: 1 },
+    { far: 0 },
+  ])('rejects invalid options before planning: %j', (options) => {
+    expect(() => planControl(planCut({ durationS: 20 }), { startS: 1, endS: 2 }, options)).toThrow();
+  });
+
+  it.each([
+    [3840, 2160, 1280, 720],
+    [2160, 3840, 720, 1280],
+  ])('caps both orientations despite oversized overrides: %s x %s', (width, height, expectedWidth, expectedHeight) => {
+    const cut = planCut({ durationS: 20, width, height });
+    const p = planControl(cut, { startS: 1, endS: 15 }, { maxSeconds: 60, maxShortSide: 4096, near: 0 });
+    expect(p).toMatchObject({ width: expectedWidth, height: expectedHeight, startS: 1, endS: 6, frameCount: 150, near: 0 });
+  });
+
+  it.each([
+    [1e12, 2],
+    [2, 1e12],
+    [Number.MAX_VALUE, 2],
+    [1e12, 1e12],
+    [1279, 719],
+  ])('bounds pathological dimensions with even output sizes: %s x %s', (width, height) => {
+    const p = planControl(planCut({ durationS: 20, width, height }), { startS: 0, endS: 1 });
+    expect(Math.min(p.width, p.height)).toBeLessThanOrEqual(720);
+    expect(Math.max(p.width, p.height)).toBeLessThanOrEqual(1280);
+    for (const size of [p.width, p.height]) {
+      expect(size).toBeGreaterThanOrEqual(2);
+      expect(size % 2).toBe(0);
+    }
+    expect(p.width).toBeLessThanOrEqual(width);
+    expect(p.height).toBeLessThanOrEqual(height);
+  });
+
+  it.each([24, 30, 60])('floors nonaligned spans and smaller overrides without exceeding their end at %s fps', (fps) => {
+    const cut = planCut({ durationS: 20, fps });
+    const startS = 3;
+    const endS = startS + 2.9 / fps;
+    const p = planControl(cut, { startS, endS });
+    expect(p.frameCount).toBe(2);
+    expect(p.endS).toBeLessThanOrEqual(endS);
+    expect(planControl(cut, { startS: endS, endS: startS })).toEqual(p);
+    const shorter = planControl(cut, { startS, endS: 10 }, { maxSeconds: 2.9 / fps, maxShortSide: 359.5 });
+    expect(shorter.frameCount).toBe(2);
+    expect(shorter.endS).toBeLessThanOrEqual(endS);
+    expect(Math.min(shorter.width, shorter.height)).toBeLessThanOrEqual(359.5);
+    const clipped = planControl({ ...cut, endS }, { startS, endS: 10 });
+    expect(clipped.frameCount).toBe(2);
+    expect(clipped.endS).toBeLessThanOrEqual(endS);
+  });
+
+  it('preserves aligned fractional times and empty spans, including spans wholly before a cut', () => {
+    const cut = planCut({ durationS: 20, fps: 30 });
+    expect(planControl(cut, { startS: 0.1, endS: 0.3 }).frameCount).toBe(6);
+    expect(planControl(cut, { startS: 1, endS: 1 }).frameCount).toBe(0);
+    expect(planControl(cut, { startS: 0, endS: 0.01 }).frameCount).toBe(0);
+    expect(planControl(cut, { startS: 0, endS: 1 }, { maxSeconds: 0 }).frameCount).toBe(0);
+    expect(planControl({ ...cut, startS: 3 }, { startS: -2, endS: 1 })).toMatchObject({ startS: 3, endS: 3, frameCount: 0 });
+    expect(planControl(planCut({ durationS: 0 }), { startS: 0, endS: 1 })).toMatchObject({ startS: 0, endS: 0, frameCount: 0 });
   });
 
   it('depth is linear between near and far, near white; the camera file says so', () => {
@@ -86,6 +191,119 @@ describe('control passes (STU-2)', () => {
     const behind = projectPoint([2, 1.6, 20], frame); // roughly behind a camera looking down −Z-ish
     const ndc = new THREE.Vector3(2, 1.6, 20).applyMatrix4(cam.matrixWorldInverse);
     expect(behind.z).toBeCloseTo(-ndc.z, 6);
+  });
+
+  it('uses actual canonical rig landmarks without reapplying the root pose or fabricating facial points', () => {
+    const names = [
+      'Neck',
+      'RightArm',
+      'RightForeArm',
+      'RightHand',
+      'LeftArm',
+      'LeftForeArm',
+      'LeftHand',
+      'RightUpLeg',
+      'RightLeg',
+      'RightFoot',
+      'LeftUpLeg',
+      'LeftLeg',
+      'LeftFoot',
+      'RightEye',
+      'LeftEye',
+    ];
+    const rigJoints: NonNullable<ActorPose['rigJoints']> = Object.fromEntries(
+      names.map((name, i) => [`mixamorig${name}`, [i + 1, i + 2, -i - 3]]),
+    );
+    Object.assign(rigJoints, {
+      mixamorigRightShoulder: [90, 91, 92],
+      mixamorigLeftShoulder: [93, 94, 95],
+      mixamorigHead: [96, 97, 98],
+      mixamorigNose: [99, 100, 101],
+      mixamorigRightEar: [102, 103, 104],
+      mixamorigLeftEar: [105, 106, 107],
+    });
+    const actor: ActorPose = { feet: [50, 60, 70], yaw: 1.2, height: 3, speed: 6, t: 9, rigJoints };
+    const result = poseKeypointsFor(actor);
+    expect(result.source).toBe('rig');
+    expect(result.points).toEqual([null, ...names.map((name) => rigJoints[`mixamorig${name}`]), null, null]);
+    for (const [i, name] of names.entries()) expect(result.points[i + 1]).not.toBe(rigJoints[`mixamorig${name}`]);
+    rigJoints.mixamorigRightForeArm = [20, 30, 40];
+    rigJoints.mixamorigLeftHand = [-10, 3, -8];
+    const changed = poseKeypointsFor(actor);
+    expect(changed.points[3]).toEqual([20, 30, 40]);
+    expect(changed.points[7]).toEqual([-10, 3, -8]);
+    expect(changed.points[3]).not.toEqual(result.points[3]);
+    expect(changed.points[7]).not.toEqual(result.points[7]);
+    changed.points[3]![0] = 999;
+    expect(rigJoints.mixamorigRightForeArm).toEqual([20, 30, 40]);
+  });
+
+  it('keeps absent neck and eyes null and draws only known joints in partial rigs', () => {
+    const actor: ActorPose = {
+      feet: [0, 0, 0],
+      yaw: 0,
+      rigJoints: { mixamorigRightForeArm: [1, 2, 3], mixamorigHead: [4, 5, 6], mixamorigSpine2: [7, 8, 9] },
+    };
+    const result = poseKeypointsFor(actor);
+    expect(result.source).toBe('rig');
+    expect(result.points).toEqual(Array.from({ length: 18 }, (_, i) => (i === 3 ? [1, 2, 3] : null)));
+    actor.rigJoints!.mixamorigLeftEye = [4, 5, 6];
+    expect(poseKeypointsFor(actor).points[14]).toBeNull();
+    expect(poseKeypointsFor(actor).points[15]).toEqual([4, 5, 6]);
+  });
+
+  it.each<ActorPose['rigJoints']>([
+    null,
+    {},
+    { arbitrary_joint: [1, 2, 3] },
+    { mixamorigHips: [1, 2, 3], mixamorigHead: [4, 5, 6], mixamorigRightShoulder: [7, 8, 9] },
+    { mixamorigRightEye: [1, 2, 3], mixamorigLeftEye: [4, 5, 6] },
+    { RightHand: [1, 2, 3], 'mixamorig:LeftHand': [4, 5, 6] },
+  ])('omits known unrigged or unrecognized body mappings: %j', (rigJoints) => {
+    expect(poseKeypointsFor({ feet: [0, 0, 0], yaw: 0, speed: 3, t: 0.2, rigJoints })).toEqual({
+      source: 'omitted',
+      points: Array(18).fill(null),
+    });
+  });
+
+  it.each(
+    [
+      NaN,
+      Infinity,
+      -Infinity,
+      undefined,
+      null,
+      '3',
+      [],
+      [1, 2],
+      [1, 2, 3, 4],
+      new Array(3),
+      [1, NaN, 3],
+      [NaN, 2, 3],
+      [1, 2, Infinity],
+    ].map((entry) => ({ entry })),
+  )('rejects malformed or nonfinite joint entries before projection: $entry', ({ entry }) => {
+    for (const name of ['mixamorigRightHand', 'mixamorigRightEye', 'unknown']) {
+      const rigJoints = { [name]: entry } as unknown as NonNullable<ActorPose['rigJoints']>;
+      expect(() => poseKeypointsFor({ feet: [0, 0, 0], yaw: 0, rigJoints })).toThrow(/rig joint.*finite/i);
+    }
+  });
+
+  it('preserves the exact legacy skeleton fallback and counts sources in actor-frame units', () => {
+    const actors: ActorPose[] = [
+      { feet: [0, 0, 0], yaw: 0 },
+      { feet: [5, 2, -3], yaw: -Math.PI / 2, height: 2, speed: 1.5, t: 0.2 },
+      { feet: [-7, 1, 4], yaw: 0.7, speed: 6, t: 2.4 },
+    ];
+    const sources: PoseSources = { unit: 'actor-frame', rig: 0, procedural: 0, omitted: 0 };
+    for (const actor of actors) {
+      const result = poseKeypointsFor(actor);
+      expect(result).toEqual({ points: skeletonFor(actor), source: 'procedural' });
+      sources[result.source]++;
+      expect(skeletonFor({ ...actor, rigJoints: null })).toEqual(result.points);
+      expect(skeletonFor({ ...actor, rigJoints: {} })).toEqual(result.points);
+    }
+    expect(sources).toEqual({ unit: 'actor-frame', rig: 0, procedural: 3, omitted: 0 });
   });
 
   it('the skeleton is an 18-keypoint OpenPose figure: right limbs on the person’s right, standing tall, walking when it moves', () => {

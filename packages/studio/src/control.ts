@@ -10,10 +10,11 @@ import type { CutPlan } from './export';
 import type { PassName } from './index';
 
 /** The passes a faithful render takes today (`normal` / `id` are optional compositing passes for later). */
-export type ControlPass = Extract<PassName, 'depth' | 'pose'>;
+export type ControlPass = Extract<PassName, 'beauty' | 'depth' | 'pose'>;
 
 export const CONTROL_MAX_SECONDS = 5;
 export const CONTROL_MAX_SHORT_SIDE = 720;
+export const CONTROL_MAX_LONG_SIDE = 1280;
 
 export interface ControlSpan {
   startS: number;
@@ -41,13 +42,50 @@ export interface ControlPlanOptions {
 
 /** The span of a cut a faithful render gets: clipped to the cut, at most 5 s, the picture no taller/wider than 720 on its short side. */
 export function planControl(cut: CutPlan, span: ControlSpan, o: ControlPlanOptions = {}): ControlPlan {
-  const maxS = o.maxSeconds ?? CONTROL_MAX_SECONDS;
+  const maxSeconds = o.maxSeconds === undefined ? CONTROL_MAX_SECONDS : o.maxSeconds;
+  const maxShortSide = o.maxShortSide === undefined ? CONTROL_MAX_SHORT_SIDE : o.maxShortSide;
+  const near = o.near === undefined ? 0.25 : o.near;
+  const far = o.far === undefined ? 60 : o.far;
+  if (
+    ![
+      cut.fps,
+      cut.width,
+      cut.height,
+      cut.startS,
+      cut.endS,
+      cut.frameCount,
+      cut.cameraLayer,
+      span.startS,
+      span.endS,
+      maxSeconds,
+      maxShortSide,
+      near,
+      far,
+    ].every(Number.isFinite) ||
+    cut.fps <= 0 ||
+    cut.fps > 60 ||
+    cut.startS < 0 ||
+    cut.endS < cut.startS ||
+    ![cut.width, cut.height].every((n) => Number.isInteger(n) && n >= 2) ||
+    !Number.isSafeInteger(cut.frameCount) ||
+    cut.frameCount < 0 ||
+    !Number.isSafeInteger(cut.cameraLayer) ||
+    cut.cameraLayer < -1 ||
+    (cut.bars !== undefined && (cut.bars.length !== 2 || !cut.bars.every(Number.isFinite))) ||
+    maxSeconds < 0 ||
+    maxShortSide < 2 ||
+    near < 0 ||
+    far <= near
+  )
+    throw new Error('invalid control planning inputs');
+  const maxS = Math.min(maxSeconds, CONTROL_MAX_SECONDS);
   const startS = Math.min(cut.endS, Math.max(cut.startS, Math.min(span.startS, span.endS)));
-  const endS = Math.min(cut.endS, Math.max(span.startS, span.endS), startS + maxS);
-  const frameCount = Math.max(0, Math.round((endS - startS) * cut.fps));
+  const endS = Math.max(startS, Math.min(cut.endS, Math.max(span.startS, span.endS), startS + maxS));
+  const frameCount = Math.max(0, Math.floor(Math.min(endS - startS, maxS) * cut.fps + 1e-9));
   const short = Math.min(cut.width, cut.height);
-  const scale = Math.min(1, (o.maxShortSide ?? CONTROL_MAX_SHORT_SIDE) / short);
-  const even = (v: number) => Math.max(2, Math.round((v * scale) / 2) * 2);
+  const long = Math.max(cut.width, cut.height);
+  const scale = Math.min(1, Math.min(maxShortSide, CONTROL_MAX_SHORT_SIDE) / short, CONTROL_MAX_LONG_SIDE / long);
+  const even = (v: number) => Math.max(2, Math.floor((v * scale) / 2) * 2);
   return {
     fps: cut.fps,
     width: even(cut.width),
@@ -55,8 +93,8 @@ export function planControl(cut: CutPlan, span: ControlSpan, o: ControlPlanOptio
     startS,
     endS: startS + frameCount / cut.fps,
     frameCount,
-    near: o.near ?? 0.25,
-    far: o.far ?? 60,
+    near,
+    far,
   };
 }
 
@@ -188,6 +226,51 @@ export interface ActorPose {
   speed?: number;
   /** Set time, for the gait phase. */
   t?: number;
+  rigJoints?: Record<string, [number, number, number]> | null;
+}
+
+export type PoseSources = { unit: 'actor-frame'; rig: number; procedural: number; omitted: number };
+
+const RIG_KEYPOINTS = [
+  null,
+  'mixamorigNeck',
+  'mixamorigRightArm',
+  'mixamorigRightForeArm',
+  'mixamorigRightHand',
+  'mixamorigLeftArm',
+  'mixamorigLeftForeArm',
+  'mixamorigLeftHand',
+  'mixamorigRightUpLeg',
+  'mixamorigRightLeg',
+  'mixamorigRightFoot',
+  'mixamorigLeftUpLeg',
+  'mixamorigLeftLeg',
+  'mixamorigLeftFoot',
+  'mixamorigRightEye',
+  'mixamorigLeftEye',
+  null,
+  null,
+] as const;
+
+export function poseKeypointsFor(actor: ActorPose): {
+  points: ([number, number, number] | null)[];
+  source: 'rig' | 'procedural' | 'omitted';
+} {
+  const joints = actor.rigJoints;
+  if (joints === undefined) return { points: skeletonFor(actor), source: 'procedural' };
+  const points: ([number, number, number] | null)[] = Array(OPENPOSE_KEYPOINTS).fill(null);
+  if (joints === null) return { points, source: 'omitted' };
+  for (const [name, point] of Object.entries(joints)) {
+    if (!Array.isArray(point) || point.length !== 3 || ![point[0], point[1], point[2]].every(Number.isFinite))
+      throw new Error(`Invalid rig joint "${name}": expected three finite coordinates.`);
+  }
+  for (const [i, name] of RIG_KEYPOINTS.entries()) {
+    if (name === null || !Object.hasOwn(joints, name)) continue;
+    const point = joints[name]!;
+    points[i] = [point[0], point[1], point[2]];
+  }
+  if (!points.slice(1, 14).some((point) => point !== null)) return { points: points.fill(null), source: 'omitted' };
+  return { points, source: 'rig' };
 }
 
 const STRIDE_M = 1.3;

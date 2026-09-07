@@ -17,6 +17,7 @@
  */
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { AvatarJobs, avatarCapabilities, boundedJson, validateAvatarInput, AVATAR_LIMITS } from './avatarJobs';
 import { manifestSummary, validateManifest, type CutManifest } from '../../../packages/studio/src/provenance';
 
 export interface Env {
@@ -32,6 +33,8 @@ export interface Env {
   SESSION_SPEND_CAP_USD: string;
   ALLOWED_ORIGIN?: string; // e.g. https://coast.wzrd.tech (dev: http://localhost:5173)
   OPENAI_API_KEY?: string;
+  FAL_KEY?: string;
+  TRIPO_API_KEY?: string;
 }
 
 export type JobMessage =
@@ -82,6 +85,10 @@ export function createApp() {
   });
 
   app.get('/api/health', (c) => c.json({ ok: true, env: c.env.ENVIRONMENT, ts: Date.now() }));
+  app.get('/api/avatar/capabilities', (c) => {
+    c.header('cache-control', 'no-store');
+    return c.json(avatarCapabilities(c.env));
+  });
 
   // Everything below needs a session id (guest sessions mint their own; sign-in binds them, ID-*).
   app.use('/api/*', async (c, next) => {
@@ -96,6 +103,34 @@ export function createApp() {
 
   // ── Budget ledger (BE-2) ──
   const ledgerOf = (env: Env, session: string) => env.SESSION.get(env.SESSION.idFromName(session));
+  app.post('/api/jobs/avatar', async (c) => {
+    c.header('cache-control', 'no-store');
+    if (Number(c.req.header('content-length')) > AVATAR_LIMITS.bodyBytes) return c.json({ error: 'avatar request too large' }, 413);
+    let body: unknown;
+    try {
+      body = await boundedJson(c.req.raw, AVATAR_LIMITS.bodyBytes);
+    } catch {
+      return c.json({ error: 'invalid or oversized avatar JSON' }, 400);
+    }
+    const input = validateAvatarInput(body);
+    if (!input)
+      return c.json({ error: 'invalid avatar input; use an image URL for Hunyuan or a prompt of 1–600 characters for Meshy' }, 400);
+    try {
+      return await ledgerOf(c.env, c.get('session')).fetch('https://do/avatar', { method: 'POST', body: JSON.stringify(input) });
+    } catch {
+      return c.json({ error: 'Avatar submission unavailable. Reuse the same requestId to check; do not create a new request.' }, 503);
+    }
+  });
+  app.get('/api/jobs/avatar/:id', async (c) => {
+    c.header('cache-control', 'no-store');
+    const id = c.req.param('id');
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) return c.json({ error: 'avatar job not found' }, 404);
+    try {
+      return await ledgerOf(c.env, c.get('session')).fetch(`https://do/avatar/${id}`);
+    } catch {
+      return c.json({ error: 'Avatar status unavailable; try checking this job again later.' }, 503);
+    }
+  });
   app.get('/api/ledger', async (c) => {
     const r = await ledgerOf(c.env, c.get('session')).fetch('https://do/ledger');
     return c.json(await r.json());
@@ -452,20 +487,45 @@ export default {
 
 /** Per-session budget ledger (BE-2): spend is debited before a vendor call, refused past the cap. */
 export class SessionDO implements DurableObject {
+  private pending: Promise<unknown> = Promise.resolve();
+  private avatars: AvatarJobs;
+
   constructor(
     private state: DurableObjectState,
     private env: Env,
-  ) {}
+  ) {
+    this.avatars = new AvatarJobs(state.storage, env);
+  }
 
-  async fetch(req: Request): Promise<Response> {
+  private serial<T>(task: () => Promise<T>): Promise<T> {
+    const result = this.pending.then(task);
+    this.pending = result.catch(() => undefined);
+    return result;
+  }
+
+  alarm(): Promise<void> {
+    return this.serial(() => this.avatars.alarm());
+  }
+
+  fetch(req: Request): Promise<Response> {
+    return this.serial(() => this.handle(req));
+  }
+
+  private async handle(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    if (url.pathname === '/avatar' && req.method === 'POST') {
+      const input = validateAvatarInput(await boundedJson(req, AVATAR_LIMITS.bodyBytes).catch(() => null));
+      return input ? this.avatars.create(input) : Response.json({ error: 'invalid avatar input' }, { status: 400 });
+    }
+    if (url.pathname.startsWith('/avatar/') && req.method === 'GET') return this.avatars.get(url.pathname.slice(8));
     const cap = Number(this.env.SESSION_SPEND_CAP_USD || '3');
     const ledger = (await this.state.storage.get<Ledger>('ledger')) ?? { spentUsd: 0, capUsd: cap, calls: [] };
     ledger.capUsd = cap;
     if (url.pathname === '/debit' && req.method === 'POST') {
       const body = (await req.json().catch(() => ({}))) as { usd?: number; what?: string };
-      const usd = Math.max(0, Number(body.usd ?? 0));
-      if (ledger.spentUsd + usd > cap) {
+      const usd = Number(body.usd ?? 0);
+      if (!Number.isFinite(usd) || usd < 0) return Response.json({ error: 'invalid debit' }, { status: 400 });
+      if (!Number.isFinite(cap) || cap <= 0 || ledger.spentUsd + usd > cap) {
         return Response.json({ error: 'session budget exhausted', spentUsd: ledger.spentUsd, capUsd: cap }, { status: 402 });
       }
       ledger.spentUsd = Math.round((ledger.spentUsd + usd) * 1e4) / 1e4;

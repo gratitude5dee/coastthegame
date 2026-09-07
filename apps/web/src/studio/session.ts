@@ -18,6 +18,9 @@ import {
   DEFAULT_BEAT_GRID,
   UNLOCKS,
   buildCutManifest,
+  buildControlPrompts,
+  type ControlPromptContext,
+  type ControlPromptBundle,
   captionTrack,
   nextUnlock,
   planControl,
@@ -35,6 +38,7 @@ import {
   type MeterSample,
   type Mission,
   type PropPose,
+  type TakeAvatar,
   type TakePose,
   type TakeV1,
   type Verdict,
@@ -44,11 +48,17 @@ import { createMissionCard, type MissionCard } from '../ui/missionCard';
 import { GhostActor, type ActorLook } from './ghosts';
 import { exportCut, type ExportResult, type ExportScene, type Overlay } from './exporter';
 import { exportControl, type ControlResult } from './control';
+import { buildControlPackage } from './controlPackage';
+
+export type ControlPackageResult = ControlResult & {
+  prompts: ControlPromptBundle;
+  package: Awaited<ReturnType<typeof buildControlPackage>>;
+};
 import { sha256Hex, uploadCut, uploadCutManifest, uploadTake } from '../api';
 import { CameraPath, type CameraKey } from '@coast/engine';
 
 /** Gives a ghost body to a take's performer (the game knows the looks; tests get capsules). */
-export type GhostFactory = (actorId: string) => GhostActor;
+export type GhostFactory = (actorId: string, avatar?: TakeV1['avatar']) => GhostActor;
 
 export type SessionState = 'idle' | 'briefed' | 'recording' | 'verdict';
 
@@ -93,6 +103,10 @@ export class StudioSession {
   readonly card: MissionCard;
   /** Who is performing the next take ('player' unless possessing an NPC, ACT-3). */
   actorId = 'player';
+  avatar?: TakeV1['avatar'];
+  prepareAvatar: ((avatar: TakeAvatar) => Promise<void>) | null = null;
+  private reviewRequest = 0;
+  private disposed = false;
   /** The mission's takes so far — they replay together (multi-take blocking). */
   readonly set = new TakeSet(3);
   /** One ghost body per set layer, same order. */
@@ -127,6 +141,8 @@ export class StudioSession {
   /** The people in the cell, for the pose pass (STU-2) — the ghosts on set are added here. */
   people: (() => ActorPose[]) | null = null;
   lastCutUrl: string | null = null;
+  lastControlUrl: string | null = null;
+  controlContext: (() => Omit<ControlPromptContext, 'cameraSource'>) | null = null;
   exporting = false;
   /** Guest session id (the Worker keys takes and cuts by it); empty = never upload. */
   sessionId = '';
@@ -194,7 +210,7 @@ export class StudioSession {
    * (≥ 1★) or out of takes; otherwise keep it so the tutor can brief it again. Returns the mission now on deck.
    */
   leave(): Mission {
-    if (this.state !== 'verdict') return this.mission;
+    if (this.state !== 'verdict' || this.exporting) return this.mission;
     this.stopPlayback();
     const best = this.stars.get(this.mission.id) ?? 0;
     const done = best >= 1 || this.takesUsed >= this.mission.takesMax;
@@ -215,7 +231,7 @@ export class StudioSession {
   }
 
   get canRoll() {
-    return (this.state === 'briefed' || this.state === 'verdict') && this.takesUsed < this.mission.takesMax;
+    return !this.exporting && (this.state === 'briefed' || this.state === 'verdict') && this.takesUsed < this.mission.takesMax;
   }
 
   /** Enter / ACTION: roll if briefed, cut if recording. Returns what happened. */
@@ -234,6 +250,7 @@ export class StudioSession {
     this.state = 'recording';
     this.startMs = ctx.nowMs;
     this.meter.reset();
+    this.recorder.avatar = this.avatar;
     this.recorder.start(ctx.nowMs, this.actorId);
     // Multi-take blocking: the earlier takes of this shot perform again, on the take clock, while this one rolls.
     if (this.set.size > 0) this.startPlayback(ctx.nowMs, false);
@@ -368,7 +385,12 @@ export class StudioSession {
       unlocked: unlocked.map((id) => UNLOCKS[id]!.label),
       ...(next ? { nextUnlock: `${next.unlock.label} at ${next.stars}★ (${next.starsToGo} to go)` } : {}),
       ...(this.exportScene && this.set.size > 0
-        ? { onExport: () => void this.exportCutToCard(), onExportPortrait: () => void this.exportCutToCard({ width: 1080, height: 1920 }) }
+        ? {
+            onExport: () => void this.exportCutToCard(),
+            onExportPortrait: () => void this.exportCutToCard({ width: 1080, height: 1920 }),
+            onExportControl: (span: ControlSpan) => void this.exportControlToCard(span),
+            controlDurationS: this.set.durationS,
+          }
         : {}),
     });
     this.onClip?.(this.lastClipUrl, verdict);
@@ -405,7 +427,7 @@ export class StudioSession {
   }
 
   retake() {
-    if (this.state !== 'verdict' || this.takesUsed >= this.mission.takesMax) return;
+    if (this.state !== 'verdict' || this.takesUsed >= this.mission.takesMax || this.exporting) return;
     this.stopPlayback();
     this.state = 'briefed';
     this.card.brief(this.mission);
@@ -425,6 +447,7 @@ export class StudioSession {
   }
 
   stopPlayback() {
+    this.reviewRequest++;
     if (this.review) {
       this.stopReview();
       return;
@@ -448,7 +471,11 @@ export class StudioSession {
   private seekSet(t: number, set = this.set, ghosts = this.ghosts) {
     for (let i = 0; i < ghosts.length; i++) {
       const pose = set.poseAt(i, t, this.ghostPose);
-      if (pose) ghosts[i]!.setPose(pose);
+      const layer = set.layers[i];
+      if (pose && layer) {
+        const timeS = Number.isNaN(t) ? 0 : Math.max(0, Math.min(t, layer.take.durationS));
+        ghosts[i]!.setPose(pose, timeS);
+      }
     }
     if (this.propWriter) {
       for (const id of set.propIds()) {
@@ -463,15 +490,29 @@ export class StudioSession {
    * ghost while the current mission's set stays as it is. Resolves false when there is nothing to watch.
    */
   async reviewMission(missionId: string, nowMs = performance.now()): Promise<boolean> {
+    const request = ++this.reviewRequest;
+    const current = () => request === this.reviewRequest && !this.disposed && this.state !== 'recording' && !this.exporting;
     const entry = this.reel.entry(missionId);
-    if (!entry?.takeId || this.state === 'recording') return false;
+    if (!entry?.takeId || !current()) return false;
     const take = this.set.layers.find((l) => l.take.id === entry.takeId)?.take ?? (await takeStore.load(entry.takeId).catch(() => null));
-    if (!take || take.samples.length < 2) return false;
+    if (!current() || !take || take.samples.length < 2) return false;
+    let ghost: GhostActor;
+    try {
+      if (take.avatar && this.prepareAvatar) await this.prepareAvatar(take.avatar);
+      if (!current()) return false;
+      ghost = this.makeGhost(take.actorId, take.avatar);
+    } catch (error) {
+      if (!current()) return false;
+      throw error;
+    }
+    if (!current()) {
+      ghost.dispose();
+      return false;
+    }
     this.stopPlayback();
     this.stopReview();
     const set = new TakeSet(1);
     set.add(take);
-    const ghost = this.makeGhost(take.actorId);
     this.review = { set, ghosts: [ghost], missionId };
     this.playbackStartMs = nowMs;
     this.playbackLoop = true;
@@ -486,6 +527,7 @@ export class StudioSession {
   }
 
   stopReview() {
+    this.reviewRequest++;
     const r = this.review;
     if (!r) return;
     this.review = null;
@@ -504,6 +546,7 @@ export class StudioSession {
     if (!this.exportScene) throw new Error('export is not available here');
     if (this.set.size === 0) throw new Error('nothing to export — cut a take first');
     if (this.exporting) throw new Error('already exporting');
+    if (this.state === 'recording') throw new Error('finish recording before exporting');
     const { captions = true, credit, id: cutId, ...cut } = opts;
     const plan = planCut({ durationS: this.set.durationS, cameraLayer: this.set.size - 1, ...cut });
     const m = this.mission;
@@ -598,24 +641,35 @@ export class StudioSession {
     opts: Partial<ControlSpan> &
       ControlPlanOptions & { passes?: ControlPass[]; cut?: Omit<CutOptions, 'durationS'>; preview?: boolean } = {},
     onProgress?: (done: number, total: number) => void,
-  ): Promise<ControlResult> {
+  ): Promise<ControlPackageResult> {
     if (!this.exportScene) throw new Error('export is not available here');
     if (this.set.size === 0) throw new Error('nothing to export — cut a take first');
     if (this.exporting) throw new Error('already exporting');
+    if (this.state === 'recording') throw new Error('finish recording before exporting');
     const cut = planCut({ durationS: this.set.durationS, cameraLayer: this.set.size - 1, ...(opts.cut ?? {}) });
     const plan = planControl(cut, { startS: opts.startS ?? cut.startS, endS: opts.endS ?? cut.endS }, opts);
-    const passes = opts.passes ?? ['depth', 'pose'];
+    const passes: ControlPass[] = opts.passes ?? ['beauty', 'depth', 'pose'];
     const path = this.cameraPath && this.cameraPath.length >= 2 ? new CameraPath(this.cameraPath) : null;
     const camLayer = this.set.layers[Math.min(Math.max(0, cut.cameraLayer), this.set.size - 1)]!;
     const host = this.exportScene();
     const wasPlaying = this.playing;
     const camPose: TakePose = { pos: [0, 0, 0], yaw: 0, speed: 0, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
     const ghostPose: TakePose = { ...camPose, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
+    const takes = this.set.layers.map((layer) => layer.take);
+    const sceneContext = this.controlContext?.();
+    const context: ControlPromptContext = {
+      cell: this.cellVersion,
+      timePreset: 'unspecified',
+      ...sceneContext,
+      look: host.look?.() ?? sceneContext?.look ?? 'unspecified',
+      cameraSource: path ? 'path' : 'take',
+      mission: { id: this.mission.id, title: this.mission.title },
+    };
     this.exporting = true;
     this.stopPlayback();
     let setTimeS = cut.startS;
     try {
-      return await exportControl(
+      const result = await exportControl(
         plan,
         {
           renderer: host.renderer,
@@ -624,6 +678,7 @@ export class StudioSession {
           ...(host.prepare ? { prepare: host.prepare } : {}),
           ...(host.frame ? { frame: host.frame } : {}),
           ...(host.settle ? { settle: host.settle } : {}),
+          ...(host.render ? { render: host.render } : {}),
           begin: () => {
             host.begin();
             for (const g of this.ghosts) {
@@ -647,23 +702,44 @@ export class StudioSession {
             for (let i = 0; i < this.ghosts.length; i++) {
               const pose = this.set.poseAt(i, setTimeS, ghostPose);
               if (!pose || pose.driving) continue; // the car has no skeleton
-              out.push({ feet: [pose.pos[0], pose.pos[1], pose.pos[2]], yaw: pose.yaw, speed: pose.speed, t: setTimeS });
+              out.push({
+                feet: [pose.pos[0], pose.pos[1], pose.pos[2]],
+                yaw: pose.yaw,
+                speed: pose.speed,
+                t: setTimeS,
+                rigJoints: this.ghosts[i]!.boneWorldPositions(),
+              });
             }
             return out;
           },
           end: () => {
             for (const g of this.ghosts) g.setSolid(false);
             host.end();
-            if (wasPlaying) this.startPlayback(performance.now(), true);
-            else for (const g of this.ghosts) g.visible = false;
           },
         },
         passes,
         onProgress,
         { preview: !!opts.preview },
       );
+      const prompts = buildControlPrompts({ plan, camera: result.camera, takes, context });
+      return { ...result, prompts, package: await buildControlPackage(result, prompts) };
     } finally {
       this.exporting = false;
+      for (const ghost of this.ghosts) ghost.setSolid(false);
+      if (wasPlaying) this.startPlayback(performance.now(), true);
+      else for (const ghost of this.ghosts) ghost.visible = false;
+    }
+  }
+
+  private async exportControlToCard(span: ControlSpan) {
+    this.card.controlProgress(0, 1);
+    try {
+      const result = await this.exportControl(span, (done, total) => this.card.controlProgress(done, total));
+      if (this.lastControlUrl) URL.revokeObjectURL(this.lastControlUrl);
+      this.lastControlUrl = URL.createObjectURL(result.package.blob);
+      this.card.controlReady(this.lastControlUrl, 'coast-control-package.tar');
+    } catch (error) {
+      this.card.controlFailed(error instanceof Error ? error.message : 'Control export failed.');
     }
   }
 
@@ -695,21 +771,24 @@ export class StudioSession {
   }
 
   private addToSet(take: TakeV1) {
-    if (take.samples.length < 2) return;
+    if (this.disposed || take.samples.length < 2) return;
     this.set.add(take);
-    const ghost = this.makeGhost(take.actorId);
+    const ghost = this.makeGhost(take.actorId, take.avatar);
     this.ghosts.push(ghost);
     while (this.ghosts.length > this.set.size) this.ghosts.shift()?.dispose(); // the set dropped its oldest layer
   }
 
   private clearSet() {
     this.stopPlayback();
+    if (this.lastControlUrl) URL.revokeObjectURL(this.lastControlUrl);
+    this.lastControlUrl = null;
     this.set.clear();
     for (const g of this.ghosts) g.dispose();
     this.ghosts.length = 0;
   }
 
   dispose() {
+    this.disposed = true;
     this.stopReview();
     this.clearSet();
     this.card.hide();

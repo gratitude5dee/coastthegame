@@ -33,6 +33,20 @@ const input = () => ({
 });
 
 describe('cut manifest (STU-5)', () => {
+  it('retains independent public avatar and outfit snapshots per take, without source URLs or images', () => {
+    const avatar = { id: 'coast', name: '$COAST', color: 0x123456, url: 'private-model', image: 'private-selfie' };
+    const m = buildCutManifest({
+      ...input(),
+      takes: [{ ...take('t1', 'player', 2), avatar }, take('t2', 'player', 3)],
+    });
+    avatar.color = 0xffffff;
+    expect(m.takeDetails[0]!.avatar).toEqual({ id: 'coast', name: '$COAST', color: 0x123456 });
+    expect(m.takeDetails[1]).not.toHaveProperty('avatar');
+    expect(JSON.stringify(m)).not.toContain('private-');
+    expect(JSON.parse(JSON.stringify(m)).takeDetails[0].avatar).toEqual(m.takeDetails[0]!.avatar);
+    expect(validateManifest(m)).toEqual([]);
+  });
+
   it('records the takes, the cells they reference, the shot and the file — and stays a valid manifest', () => {
     const m = buildCutManifest(input());
     expect(m.v).toBe(MANIFEST_VERSION);

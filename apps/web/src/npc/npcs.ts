@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import type * as RAPIER_NS from '@dimforge/rapier3d-compat';
-import { NpcBrain, NpcNav, type PhysicsWorld } from '@coast/engine';
+import { NpcBrain, NpcNav, type Avatar, type AvatarAsset, type PhysicsWorld } from '@coast/engine';
 import type { CrowdAgent } from 'recast-navigation';
 
 export interface NpcSpec {
@@ -23,6 +23,7 @@ export interface Npc {
   spec: NpcSpec;
   brain: NpcBrain;
   mesh: THREE.Group;
+  avatar?: Avatar;
   /** The capsule (its material carries the identity's colour). */
   capsule: THREE.Mesh<THREE.CapsuleGeometry, THREE.MeshStandardMaterial>;
   body: RAPIER_NS.RigidBody;
@@ -34,6 +35,7 @@ export interface Npc {
 
 export interface NpcEvents {
   onGreet?: (npc: Npc, line: string) => void;
+  avatarFor?: (spec: NpcSpec) => { asset: AvatarAsset; color?: number };
 }
 
 export class NpcSystem {
@@ -41,6 +43,7 @@ export class NpcSystem {
   private nav: NpcNav | null = null;
   private navFailed = false;
   private navGen = 0;
+  private animationTimeS = 0;
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
   private readonly playerTuple: [number, number, number] = [0, 0, 0];
@@ -119,8 +122,39 @@ export class NpcSystem {
       faceTarget: null,
       lineIndex: 0,
     };
+    this.refreshAvatar(npc);
     this.npcs.push(npc);
     return npc;
+  }
+
+  private refreshAvatar(npc: Npc) {
+    const visual = this.events.avatarFor?.(npc.spec);
+    const avatar = visual?.asset.instantiate();
+    if (avatar) avatar.setTint(visual?.color ?? npc.spec.color);
+    npc.avatar?.dispose();
+    npc.avatar = avatar;
+    for (const child of npc.mesh.children) if ((child as THREE.Mesh).isMesh) child.visible = !avatar;
+    if (avatar) {
+      npc.mesh.add(avatar.group);
+      npc.mesh.updateWorldMatrix(true, true);
+      avatar.sample(this.animationTimeS, 0, true);
+    }
+  }
+
+  private disposeVisual(npc: Npc) {
+    npc.avatar?.group.removeFromParent();
+    npc.avatar?.dispose();
+    npc.avatar = undefined;
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    npc.mesh.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      geometries.add(mesh.geometry);
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) materials.add(material);
+    });
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
   }
 
   byId(id: string): Npc | undefined {
@@ -137,6 +171,7 @@ export class NpcSystem {
     this.physics.world.removeRigidBody(n.body);
     if (n.agent && this.nav) this.nav.removeAgent(n.agent);
     n.agent = null;
+    this.disposeVisual(n);
     return true;
   }
 
@@ -165,6 +200,7 @@ export class NpcSystem {
     pos.y = this.groundY(pos);
     npc.spec = { ...identity, home: pos.clone() };
     npc.capsule.material.color.setHex(identity.color);
+    npc.mesh.name = npc.spec.id;
     npc.mesh.position.copy(pos);
     npc.mesh.rotation.y = yaw;
     npc.facing = yaw;
@@ -184,12 +220,16 @@ export class NpcSystem {
       greetDelay: 10,
       random: this.random,
     });
+    this.refreshAvatar(npc);
     return was;
   }
 
   /** Per frame: brains → crowd → meshes/bodies. `paused` (diorama) freezes everyone. */
   update(dt: number, playerFeet: THREE.Vector3, paused = false) {
-    if (paused || !this.nav) return; // brains wait for the navmesh: a moveTo before the agent exists would be lost
+    if (paused) return;
+    this.animationTimeS += dt;
+    if (!this.nav) for (const n of this.npcs) n.avatar?.sample(this.animationTimeS, 0, true);
+    if (!this.nav) return; // brains wait for the navmesh: a moveTo before the agent exists would be lost
     this.playerTuple[0] = playerFeet.x;
     this.playerTuple[1] = playerFeet.y;
     this.playerTuple[2] = playerFeet.z;
@@ -235,13 +275,21 @@ export class NpcSystem {
       const delta = Math.atan2(Math.sin(n.facing - cur), Math.cos(n.facing - cur));
       n.mesh.rotation.y = cur + delta * Math.min(1, dt * 8);
       n.body.setNextKinematicTranslation({ x: n.mesh.position.x, y: n.mesh.position.y + 0.9, z: n.mesh.position.z });
+      if (n.avatar) {
+        const velocity = n.agent ? this.nav.velocity(n.agent, this.tmp2) : this.tmp2.set(0, 0, 0);
+        n.mesh.updateWorldMatrix(true, true);
+        n.avatar.sample(this.animationTimeS, Math.hypot(velocity.x, velocity.z), true);
+      }
     }
   }
 
   dispose() {
+    this.navGen++;
     for (const n of this.npcs) {
       this.world.remove(n.mesh);
       this.physics.world.removeRigidBody(n.body);
+      n.agent = null;
+      this.disposeVisual(n);
     }
     this.npcs.length = 0;
     this.nav?.dispose();

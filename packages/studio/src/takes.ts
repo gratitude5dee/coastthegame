@@ -62,10 +62,27 @@ export interface PropTrack {
   samples: PropPose[];
 }
 
+export interface TakeAvatar {
+  id: string;
+  name: string;
+  color?: number;
+}
+
+function snapshotAvatar(avatar: TakeAvatar): TakeAvatar {
+  return {
+    id: avatar.id,
+    name: avatar.name,
+    ...(typeof avatar.color === 'number' && Number.isInteger(avatar.color) && avatar.color >= 0 && avatar.color <= 0xffffff
+      ? { color: avatar.color }
+      : {}),
+  };
+}
+
 export interface TakeV1 {
   v: 1;
   id: string;
   actorId: string;
+  avatar?: TakeAvatar;
   /** `cell.json.version` the take was recorded against — replays are only valid against it (ACT-4). */
   cellVersion: string;
   /** Nominal sample rate. Sample times are stored explicitly, so the grid is not assumed on replay. */
@@ -85,6 +102,7 @@ export interface TakeV1 {
 /** The interpolated pose `TakePlayer.poseAt` returns (the caller's `out` object when given). */
 export interface TakePose {
   pos: Vec3;
+  grounded?: boolean;
   /** Radians, wrapped to [-π, π]. */
   yaw: number;
   speed: number;
@@ -158,6 +176,7 @@ function slerp(a: Quat, b: Quat, u: number, out: Quat): Quat {
 
 export interface TakeRecorderOptions {
   actorId: string;
+  avatar?: TakeAvatar;
   cellVersion: string;
   /** Sample rate, default 30. Samples are rate-limited to this; the engine can feed it at any frame rate. */
   hz?: number;
@@ -238,6 +257,7 @@ export class TakeRecorder {
   readonly hz: number;
   /** Who is performing; `start()` can set it per take (possession, ACT-3). */
   actorId: string;
+  avatar?: TakeAvatar;
   private readonly cellVersion: string;
   private readonly idFactory: () => string;
   private readonly periodMs: number;
@@ -245,6 +265,7 @@ export class TakeRecorder {
   private id = '';
   private startMs = 0;
   private startedAt = '';
+  private recordedAvatar?: TakeAvatar;
   private lastStoredMs = -Infinity;
   private samples: TakeSample[] = [];
   private worldEdits: WorldEdit[] = [];
@@ -259,6 +280,7 @@ export class TakeRecorder {
     this.hz = hz;
     this.periodMs = 1000 / hz;
     this.actorId = opts.actorId;
+    this.avatar = opts.avatar;
     this.cellVersion = opts.cellVersion;
     this.idFactory = opts.idFactory ?? defaultId;
   }
@@ -270,6 +292,7 @@ export class TakeRecorder {
   /** Begin a new take at `nowMs` (any monotonic clock, e.g. `performance.now()`); resets the buffers. */
   start(nowMs: number, actorId?: string): void {
     if (actorId !== undefined) this.actorId = actorId;
+    this.recordedAvatar = this.avatar ? snapshotAvatar(this.avatar) : undefined;
     this.isRecording = true;
     this.id = this.idFactory();
     this.startMs = nowMs;
@@ -369,6 +392,7 @@ export class TakeRecorder {
       v: 1,
       id: this.id,
       actorId: this.actorId,
+      ...(this.recordedAvatar ? { avatar: snapshotAvatar(this.recordedAvatar) } : {}),
       cellVersion: this.cellVersion,
       hz: this.hz,
       startedAt: this.startedAt,
@@ -389,6 +413,7 @@ function copyPose(s: TakeSample, o: TakePose): TakePose {
   o.yaw = wrapAngle(s.yaw);
   o.speed = s.speed;
   o.driving = !!s.driving;
+  o.grounded = !!s.grounded;
   o.camPos[0] = s.camPos[0];
   o.camPos[1] = s.camPos[1];
   o.camPos[2] = s.camPos[2];
@@ -490,6 +515,7 @@ export class TakePlayer {
     o.yaw = lerpAngle(a.yaw, b.yaw, u);
     o.speed = lerp(a.speed, b.speed, u);
     o.driving = !!a.driving;
+    o.grounded = !!a.grounded;
     o.camPos[0] = lerp(a.camPos[0], b.camPos[0], u);
     o.camPos[1] = lerp(a.camPos[1], b.camPos[1], u);
     o.camPos[2] = lerp(a.camPos[2], b.camPos[2], u);
@@ -560,6 +586,7 @@ export function encodeTake(take: TakeV1): Uint8Array {
     v: 1,
     id: take.id,
     actorId: take.actorId,
+    ...(take.avatar ? { avatar: snapshotAvatar(take.avatar) } : {}),
     cellVersion: take.cellVersion,
     hz: take.hz,
     startedAt: take.startedAt,
@@ -659,6 +686,9 @@ export function decodeTake(bytes: Uint8Array): TakeV1 {
     v: 1,
     id: String(header.id ?? ''),
     actorId: String(header.actorId ?? ''),
+    ...(header.avatar && typeof header.avatar.id === 'string' && typeof header.avatar.name === 'string'
+      ? { avatar: snapshotAvatar(header.avatar) }
+      : {}),
     cellVersion: String(header.cellVersion ?? ''),
     hz: typeof header.hz === 'number' ? header.hz : 30,
     startedAt: String(header.startedAt ?? ''),

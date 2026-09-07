@@ -28,10 +28,36 @@ beforeAll(async () => {
   mkdirSync(join(process.cwd(), 'apps/web/dist'), { recursive: true }); // wrangler insists the assets dir exists (no build needed)
   proc = spawn(
     'pnpm',
-    ['exec', 'wrangler', 'dev', '--local', '--port', String(PORT), '--ip', '127.0.0.1', '--persist-to', persist, '--log-level', 'error'],
+    [
+      'exec',
+      'wrangler',
+      'dev',
+      '--local',
+      '--port',
+      String(PORT),
+      '--ip',
+      '127.0.0.1',
+      '--persist-to',
+      persist,
+      '--log-level',
+      'error',
+      '--var',
+      'FAL_KEY:',
+      '--var',
+      'OPENAI_API_KEY:',
+    ],
     {
       cwd: join(process.cwd(), 'workers/api'),
-      env: { ...process.env, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
+      env: {
+        ...process.env,
+        NO_PROXY: '127.0.0.1,localhost',
+        no_proxy: '127.0.0.1,localhost',
+        CLOUDFLARE_INCLUDE_PROCESS_ENV: 'false',
+        CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: 'false',
+        FAL_KEY: '',
+        OPENAI_API_KEY: '',
+        WRANGLER_SEND_METRICS: 'false',
+      },
       stdio: 'ignore',
     },
   );
@@ -245,6 +271,26 @@ describe('Worker API (workerd, local R2 + DO)', () => {
     // No OPENAI_API_KEY locally → 503 before any debit.
     expect((await req('/api/realtime/secret', { method: 'POST', body: '{}' })).status).toBe(503);
     expect((await (await req('/api/ledger')).json()).spentUsd).toBe(0);
+  });
+
+  it('avatar generation is explicitly unavailable without keys while session uploads still work', async () => {
+    const capabilities = await req('/api/avatar/capabilities', {}, null);
+    expect(capabilities.headers.get('cache-control')).toBe('no-store');
+    expect(await capabilities.json()).toEqual({ providers: { tripo: false, 'fal-hunyuan': false, 'fal-meshy': false } });
+    const input = { provider: 'fal-meshy', prompt: 'A stylized humanoid', requestId: 'avatar-request-0001' };
+    expect((await req('/api/jobs/avatar', { method: 'POST', body: JSON.stringify(input) }, null)).status).toBe(401);
+    const created = await req('/api/jobs/avatar', { method: 'POST', body: JSON.stringify(input) });
+    expect(created.status).toBe(503);
+    expect(created.headers.get('cache-control')).toBe('no-store');
+    const hunyuan = await req('/api/jobs/avatar', {
+      method: 'POST',
+      body: JSON.stringify({ provider: 'fal-hunyuan', imageUrl: 'https://photos.coast.ai/a.png', requestId: 'hunyuan-request' }),
+    });
+    expect(hunyuan.status).toBe(503);
+    expect((await hunyuan.json()).error).toContain('requires mesh reduction to 30000 triangles');
+    expect((await (await req('/api/ledger')).json()).spentUsd).toBe(0);
+    expect((await req('/api/jobs/avatar/00000000-0000-0000-0000-000000000000')).status).toBe(404);
+    expect((await req('/api/takes')).status).toBe(200);
   });
 
   it('parseRange covers the forms browsers send', () => {

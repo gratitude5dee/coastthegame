@@ -9,6 +9,7 @@ export default defineConfig({
       '@coast/director': path.resolve(__dirname, 'packages/director/src/index.ts'),
       '@coast/studio': path.resolve(__dirname, 'packages/studio/src/index.ts'),
       // Engine tests import three + Rapier from the web app's install (peer deps of the engine; root has neither).
+      'three/addons': path.resolve(__dirname, 'apps/web/node_modules/three/examples/jsm'),
       three: path.resolve(__dirname, 'apps/web/node_modules/three'),
       '@dimforge/rapier3d-compat': path.resolve(__dirname, 'apps/web/node_modules/@dimforge/rapier3d-compat'),
     },

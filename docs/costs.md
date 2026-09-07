@@ -24,4 +24,7 @@ Daily dev cap: **$40** (AGENTS.md §4). Log every vendor spend here (date · job
 ## Log
 | date | job | vendor | units | USD |
 |---|---|---|---|---|
-| | | | | |
+| 2026-09-07 | CHR-1 / CAP-1 local avatar implementation and mocked generation tests | none | no paid requests | 0 |
+| 2026-09-07 | STU-2 / GEN-2 control reference package and local prompt composition | none | no paid requests or uploads | 0 |
+
+Avatar jobs reserve $1.60 for Meshy v6 full text-to-3D before submission (conservative headroom over the referenced $0.80 generation price). This counts against the session cap and remains reserved on failed or unknown outcomes; it is not a metered vendor invoice. Hunyuan's dormant $0.75 estimate is never reserved while that provider is blocked by the 40k/30k geometry mismatch. Tripo remains disabled pending approved clip mapping. The per-session ledger is not a global daily spend gate; live generation/deployment still requires the appropriate provisioning and authorization.

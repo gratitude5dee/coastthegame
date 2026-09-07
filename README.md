@@ -63,6 +63,35 @@ Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints 
 
 No headset? `?xrsim=1` on the dev server boots an emulated Quest 3 with an on-screen puppeteering panel (IWER); press ENTER VR.
 
+## Bring your own character (CHR-1 / CAP-1)
+
+**U** or the **Avatar** button opens the optional card. Upload a self-contained GLB, paste a URL, or return to the walking mannequin. Choose whether the source faces −Z or +Z; imports normalize to 1.8 m tall with rest-pose feet on the ground. `?avatar=<encoded-url>&avatarForward=-Z` loads a QA character. Invalid/oversized imports leave the current character intact. The importer supports embedded meshopt geometry but currently rejects Draco, KTX2 and externally referenced textures/buffers with conversion guidance.
+
+Mixamo-named rigs use named idle/walk/run/fall clips when present, otherwise a procedural gait. Unrigged meshes remain rigid figurines. Player, NPC possession and ghosts use independent instances. Takes and cut manifests preserve the chosen avatar name/ID/tint, but not its URL. Check **Save on this device** before importing to retain the exact GLB locally. **Saved avatars → Use saved** restores one; the remembered saved selection returns after reload. Saved-take replay loads its referenced model without changing the current player's selection. **Remove saved** asks for confirmation, removes only that device copy, and leaves takes and currently loaded copies untouched. Full recorded bone tracks, foot IK and CHR-2 crossfades are not implemented yet.
+
+Device storage is opt-in IndexedDB (`coast-avatars`), separate from takes, bounded to eight files / 128 MiB total GLB bytes / 20 MiB per file. Stable IDs hash bytes and normalization options, not filenames or URLs; identical imports deduplicate, while a different forward direction gets a different ID. There is no automatic eviction or cloud backup. Quota/storage failures are reported; the import remains usable for the page when saving fails. Clearing browser/site data can remove saved files. Page-only imports do not change the remembered saved choice; **Use mannequin** clears it. Up to eight distinct imported assets are loaded in memory per page, independently of the disk limit. Reimporting the exact bytes/options can restore a new stable-ID take after device removal; older UUID-based imports from before this checkpoint cannot be recovered automatically.
+
+Generation requires a configured Worker `FAL_KEY`, an explicit consent checkbox and a session-budget reservation. **Meshy v6 text-to-3D** is wired through a durable, idempotent job; use **Check existing job / use result** to poll. Pending inputs/request IDs stay in tab-scoped sessionStorage for reload recovery; checking a job does not submit or charge again. The $1.60 reservation is conservative and remains against the session cap on failures, not a claim of the provider's final invoice. No paid generation was used to verify this implementation.
+
+**Tripo is gated off** pending an approved mapping for the six onboarding clips; its documented presets lack point. **Hunyuan is gated off** because its documented 40k-face minimum exceeds the 30k import budget and requires a reduction step. Upload and URL still work without provider keys or a Worker. See [ADR-0002](docs/adr/0002-characters-glb-mixamo.md) for limits and decisions. No deployment or provider provisioning is performed by importing a character.
+
+## Control reference package (STU-2 / GEN-2)
+
+After cutting a take, choose **Start (s)** and **End (s)** on the verdict card, then **Control package**. The span is at most five seconds. **Download .tar** contains matching `beauty`, `depth` and `pose` MP4/WebM videos, `hero.png` (the first beauty frame), `camera.json`, `prompts.json`, `prompts.txt`, and a SHA-256 file manifest in `package.json`. The files stay local; this does not submit to a video model or upload anything.
+
+The prompt bundle describes the actual recorded subspan, current look/time/cell, avatar identities and sampled camera movement. It includes plain-language Seedance/Veo/Kling/LTX/Wan drafts; each endpoint's accepted reference/control formats must still be verified before submission. The pose pass uses available Mixamo rig joints, omits unsupported/unrigged bodies and missing face landmarks, and keeps a procedural fallback only for legacy actors. Its manifest reports the source counts. This package has no audio or captions; full recorded bone motion remains pending.
+
+Agent/QA entry point:
+
+```js
+const result = await window.__coastExportControl({ startS: 0, endS: 1, preview: true });
+result.hero;
+result.prompts;
+result.package.url;
+```
+
+Explicit `passes: ['depth', 'pose']` skips the beauty video but keeps the hero still and metadata. Export bounds are 720 short side / 1280 long side, five seconds, and up to 60 fps; smaller frame rates are available through the QA hook. Archive creation requires `crypto.subtle` in a secure context. See [ADR-0012](docs/adr/0012-control-passes.md) for cleanup, timing and remaining fidelity limits.
+
 ## Status
 
 Milestone **M3 — actor mode** on sample worlds (see `docs/tasks.md`): Rapier physics with splat-derived ground, the character, props with put-that-there, the **lowrider** (raycast vehicle + hydraulics + beat grid), **NPCs on a runtime navmesh** (Recast/Detour crowd, loiter · approach · greet), **possession and multi-take blocking**, the **director's console** (spoken or typed directions → scene acts, the surface the voice model drives in M5), the camera rig, the **M3.5 vertical slice** (missions → takes → verdict → billboard/download), the **Coast Cut export** (fixed-step 1080p30 MP4 of the whole set via WebCodecs + Mediabunny) and **cell streaming** (W-3: the sample worlds strung into a level by procedural roads — the next cell streams in 15 m before its doorway, never more than two resident, no loading screen; ADR-0009). Marble cells (M2) wire in as soon as a World Labs key lands in `.env`.

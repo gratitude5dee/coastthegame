@@ -62,6 +62,7 @@ export class KeyboardMouseProvider implements InputProvider {
     out.undo = out.undo || this.edges.has('KeyZ');
     out.modeCycle = out.modeCycle || this.edges.has('Tab');
     out.timeCycle = out.timeCycle || this.edges.has('KeyT');
+    out.avatar = out.avatar || this.edges.has('KeyU');
     out.debugToggle = out.debugToggle || this.edges.has('KeyC');
     out.resetEdge = out.resetEdge || this.edges.has('KeyR');
     out.action = out.action || this.edges.has('Enter') || this.edges.has('NumpadEnter');
@@ -166,5 +167,5 @@ export class KeyboardMouseProvider implements InputProvider {
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
-  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 }

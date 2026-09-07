@@ -72,6 +72,39 @@ function sampleAt(t: number, over: Partial<TakeSample> = {}): TakeSample {
 // ── TakeRecorder ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('TakeRecorder', () => {
+  it('snapshots avatar identity and outfit at start and roundtrips only public metadata', () => {
+    const avatar = { id: 'coast', name: '$COAST', color: 0x123456, url: 'private-model', image: 'private-selfie' };
+    const rec = new TakeRecorder({ actorId: 'player', cellVersion: 'v', avatar });
+    avatar.name = 'Coast';
+    rec.start(0);
+    rec.sample(0, input());
+    avatar.id = 'replacement';
+    avatar.color = 0xffffff;
+    rec.avatar = { id: 'new', name: 'New' };
+    const recorded = rec.stop(1000);
+    expect(recorded.avatar).toEqual({ id: 'coast', name: 'Coast', color: 0x123456 });
+    const bytes = encodeTake(recorded);
+    expect(new TextDecoder().decode(bytes)).not.toContain('private-');
+    expect(decodeTake(bytes).avatar).toEqual(recorded.avatar);
+    expect(decodeTake(encodeTake({ ...recorded, avatar })).avatar).toEqual({ id: 'replacement', name: 'Coast', color: 0xffffff });
+    rec.start(2000);
+    expect(rec.stop(3000).avatar).toEqual({ id: 'new', name: 'New' });
+    rec.avatar = undefined;
+    rec.start(4000);
+    expect(decodeTake(encodeTake(rec.stop(5000)))).not.toHaveProperty('avatar');
+    expect(recorded.avatar).toEqual({ id: 'coast', name: 'Coast', color: 0x123456 });
+  });
+
+  it('replays grounded as a discrete flag, including backwards seeks and held endpoints', () => {
+    const p = new TakePlayer(take([sampleAt(0), sampleAt(1, { grounded: false }), sampleAt(2)]));
+    expect(p.poseAt(0.5).grounded).toBe(true);
+    expect(p.poseAt(1).grounded).toBe(false);
+    expect(p.poseAt(1.5).grounded).toBe(false);
+    expect(p.poseAt(5).grounded).toBe(true);
+    expect(p.poseAt(1.2).grounded).toBe(false);
+    expect(p.poseAt(-1).grounded).toBe(true);
+  });
+
   it('stores the first sample and rate-limits 120 Hz input to 30 Hz', () => {
     const { take, stored, frames } = record(120, 60);
     expect(stored[0]).toBe(true);
@@ -321,7 +354,15 @@ describe('TakePlayer', () => {
   it('replays an empty take as the origin / identity and a single-sample take as that sample', () => {
     const empty = new TakePlayer(take([], [], 2));
     expect(empty.durationS).toBe(2);
-    expect(empty.poseAt(1)).toEqual({ pos: [0, 0, 0], yaw: 0, speed: 0, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] });
+    expect(empty.poseAt(1)).toEqual({
+      pos: [0, 0, 0],
+      yaw: 0,
+      speed: 0,
+      grounded: false,
+      driving: false,
+      camPos: [0, 0, 0],
+      camQuat: [0, 0, 0, 1],
+    });
     const one = new TakePlayer(take([sampleAt(0.5, { pos: [1, 2, 3], yaw: 1, speed: 3, camQuat: rotY(30) })]));
     expect(one.poseAt(0)).toMatchObject({ pos: [1, 2, 3], yaw: 1, speed: 3 });
     expect(one.poseAt(9)).toMatchObject({ pos: [1, 2, 3], camQuat: rotY(30) });
