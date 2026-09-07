@@ -16,10 +16,13 @@ import {
   TakeRecorder,
   TakeSet,
   DEFAULT_BEAT_GRID,
+  UNLOCKS,
   buildCutManifest,
   captionTrack,
+  nextUnlock,
   planControl,
   planCut,
+  unlocksFor,
   setTime,
   takeStore,
   type ActorPose,
@@ -344,7 +347,10 @@ export class StudioSession {
     const verdict = this.meter.finish(elapsed, take.id);
     this.lastVerdict = verdict;
     if (verdict.stars > (this.stars.get(this.mission.id) ?? 0)) this.stars.set(this.mission.id, verdict.stars);
+    const before = unlocksFor(this.reel, this.missions);
     this.reel.record(this.mission.id, verdict.stars, take.id);
+    const unlocked = unlocksFor(this.reel, this.missions).filter((id) => !before.includes(id)); // MIS-4: what this verdict brought
+    const next = nextUnlock(this.reel);
     this.onReel?.(this.reel);
     performance.mark('coast:take-cut');
     void takeStore.save(take).catch(() => {});
@@ -359,6 +365,8 @@ export class StudioSession {
       downloadName: `coast-${this.mission.id}-take${this.takesUsed}.${ext}`,
       onRetake: this.takesUsed < this.mission.takesMax ? () => this.retake() : undefined,
       onPlayback: () => this.startPlayback(performance.now()),
+      unlocked: unlocked.map((id) => UNLOCKS[id]!.label),
+      ...(next ? { nextUnlock: `${next.unlock.label} at ${next.stars}★ (${next.starsToGo} to go)` } : {}),
       ...(this.exportScene && this.set.size > 0
         ? { onExport: () => void this.exportCutToCard(), onExportPortrait: () => void this.exportCutToCard({ width: 1080, height: 1920 }) }
         : {}),

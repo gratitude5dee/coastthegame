@@ -525,7 +525,7 @@ export const MISSION_LOW_AND_SLOW: Mission = {
     timePreset: 'shoot at golden hour — {off} of this take was {value}',
     duration_s: 'aim for a {target} take — this one ran {value}',
   },
-  reward: { stars: 3, unlock: 'lens-24mm' },
+  reward: { stars: 3, unlock: 'lens-35mm' },
   takesMax: 3,
   authoredBy: 'human',
 };

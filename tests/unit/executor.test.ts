@@ -60,6 +60,7 @@ function fakeScene() {
       return true;
     },
     setWeather: () => false,
+    setLoadout: () => 'nothing unlocked yet',
     setLook: (name) => {
       log.push(`look ${name}`);
       return name !== 'vhs-1994'; // this stage has no VHS

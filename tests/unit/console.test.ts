@@ -22,6 +22,7 @@ function ops(log: string[]): SceneOps {
     },
     setWeather: () => false,
     setLook: () => false,
+    setLoadout: () => 'nothing unlocked yet',
     possess: () => false,
     playAnim: () => false,
     replay: () => false,

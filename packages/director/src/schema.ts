@@ -47,6 +47,7 @@ export type SceneAct =
   | { op: 'set_time'; preset?: 'golden' | 'blue' | 'night' | 'fog_noon'; hour?: number }
   | { op: 'set_weather'; kind: 'fog' | 'clear' | 'rain'; amount?: number }
   | { op: 'set_look'; preset: LookName }
+  | { op: 'loadout'; outfit?: string; pattern?: string }
   | { op: 'play_anim'; actor: ObjectRef; clip: string; loop?: boolean }
   | { op: 'possess'; actor: ObjectRef }
   | { op: 'replay_take'; take: string; actor: ObjectRef }
@@ -104,6 +105,7 @@ export const TOOL_MODES: Record<string, RigMode[]> = {
   set_time: ['producer', 'director'],
   set_weather: ['producer', 'director'],
   set_look: ['producer', 'director'],
+  loadout: ['actor', 'director', 'producer'], // "wear the gold fit", "three-wheel motion" — the reel's unlocks (MIS-4)
   // director — camera + performance + record
   play_anim: ['director'],
   possess: ['director', 'producer'],
@@ -247,6 +249,10 @@ const ALL_TOOLS = [
   }),
   tool('set_weather', 'Set weather.', { kind: { enum: ['fog', 'clear', 'rain'] }, amount: { type: 'number' } }, ['kind']),
   tool('set_look', 'Put a look (film stock LUT) on the picture, live and in the cut.', { preset: { enum: [...LOOK_NAMES] } }, ['preset']),
+  tool('loadout', 'Wear an unlocked outfit or run an unlocked hydraulic pattern (ids from the reel, or "default" / "classic").', {
+    outfit: { type: 'string' },
+    pattern: { type: 'string' },
+  }),
   tool('play_anim', 'Play an animation clip on an actor.', { actor: REF, clip: { type: 'string' }, loop: { type: 'boolean' } }, [
     'actor',
     'clip',

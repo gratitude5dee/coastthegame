@@ -25,6 +25,9 @@ export interface MissionCard {
       onPlayback?: () => void;
       onExport?: () => void;
       onExportPortrait?: () => void;
+      /** Progression (MIS-4): what this verdict unlocked, and what the next star brings. */
+      unlocked?: string[];
+      nextUnlock?: string;
     },
   ): void;
   /** Cut export (STU-3) feedback on the verdict view: progress, the finished file, or what went wrong. */
@@ -72,6 +75,8 @@ const CSS = `
 .mc-aes{margin-top:4px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(242,236,220,.5)}
 .mc-hints{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:12px}
 .mc-hints li::before{content:"→ ";color:#ffb54a}
+.mc-unlock{margin:8px 0 0;font-size:12px;color:#ffd23f}
+.mc-unlock .next{color:#f2ecdc;opacity:.7}
 .mc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .mc-btn{pointer-events:auto;touch-action:manipulation;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:44px;min-width:44px;padding:0 16px;border-radius:8px;border:1px solid rgba(242,236,220,.25);background:rgba(242,236,220,.06);color:#f2ecdc;font:600 12px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;letter-spacing:.06em;text-decoration:none;cursor:pointer;text-shadow:none;-webkit-tap-highlight-color:transparent}
 .mc-btn:hover{background:rgba(242,236,220,.12)}
@@ -327,7 +332,14 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
 
       verdictEl.replaceChildren(stars);
       if (v.aesthetic) verdictEl.append(h('div', 'mc-aes', `look ${Math.round(v.aesthetic.score)} / 10 · advisory`));
-      verdictEl.append(hints, actions);
+      verdictEl.append(hints);
+      if (opts.unlocked?.length || opts.nextUnlock) {
+        const u = h('div', 'mc-unlock');
+        if (opts.unlocked?.length) u.append(h('span', 'got', `unlocked: ${opts.unlocked.join(' · ')}`));
+        if (opts.nextUnlock) u.append(h('span', 'next', `${opts.unlocked?.length ? ' · ' : ''}next: ${opts.nextUnlock}`));
+        verdictEl.append(u);
+      }
+      verdictEl.append(actions);
       verdictEl.hidden = false;
       el.hidden = false;
     },

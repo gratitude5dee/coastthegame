@@ -117,6 +117,20 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   await expect(reelButton).toBeEnabled();
   const stars = ((await reelButton.textContent()) ?? '').split('★').length - 1;
   await expect(page.locator('#coast-reel .rl-bar.earned')).toHaveCount(stars >= 1 ? 8 : 0);
+  // Progression (MIS-4): an earned mission unlocks its reward (the 35 mm); the 85 mm and the chrome fit stay behind
+  // stars, and the director says so.
+  type U = { unlocked: string[]; loadout: { outfit: string | null; pattern: string | null }; next: string | null };
+  const unlocks = (await page.evaluate(() => (window as unknown as { __coastUnlocks: () => U }).__coastUnlocks()))!;
+  expect(unlocks.unlocked.includes('lens-35mm')).toBe(stars >= 1);
+  expect(unlocks.unlocked).not.toContain('lens-85mm');
+  expect(unlocks.next).toBeTruthy();
+  const long = await page.evaluate(() => window.__coastSay!('85mm').results[0]);
+  expect(long?.ok).toBe(false);
+  const chrome = await page.evaluate(() => window.__coastSay!('put on the chrome').results[0]);
+  expect(chrome?.ok).toBe(false);
+  expect(chrome?.error).toMatch(/chrome fit is locked — \d+★/);
+  const wide = await page.evaluate(() => window.__coastSay!('35mm').results[0]);
+  expect(wide?.ok).toBe(stars >= 1);
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 

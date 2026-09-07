@@ -55,7 +55,18 @@ import {
   type DeixisSample,
 } from '@coast/engine';
 import type { PostStack } from '@coast/engine/post';
-import { BeatClock, type MeterSample } from '@coast/studio';
+import {
+  BeatClock,
+  CLASSIC_PATTERN,
+  FREE_TIME_PRESETS,
+  UNLOCKS,
+  lensFor,
+  nextUnlock,
+  starsNeeded,
+  unlocksFor,
+  unlocksOfKind,
+  type MeterSample,
+} from '@coast/studio';
 import { newFrameInput, resetFrameInput, type FrameInput, type InputProvider } from './input/intents';
 import { KeyboardMouseProvider } from './input/keyboardMouse';
 import { TouchProvider } from './input/touch';
@@ -115,7 +126,6 @@ const CAR_FEET_DROP = 0.6;
 const CAR_EYE_HEIGHT = 1.55;
 const CAR_FOLLOW = { distance: 2.1, height: 1.0 };
 /** Beat-driven hydraulics pattern per beat in the bar (PHY-3 "driven by the track's beat grid"). */
-const AUTO_HOP_PATTERN: HopPattern[] = ['front', 'back', 'left', 'right'];
 const ENTER_DISTANCE = 3.4;
 /** Possession reach (ACT-3): the nearest NPC within this many metres swaps bodies with you on V / Back / BE. */
 const POSSESS_DISTANCE = 4;
@@ -200,6 +210,13 @@ declare global {
     };
     /** QA: put a look on the picture (what "make it noir" does through the director). */
     __coastLook?: (name: string) => boolean;
+    /** QA: progression (MIS-4) — what the reel unlocked, what is worn / run, what the next star brings. */
+    __coastUnlocks?: () => {
+      unlocked: string[];
+      loadout: { outfit: string | null; pattern: string | null };
+      next: string | null;
+      hopSequence: string[];
+    };
     /** QA: run the live frame through the post stack or straight to the canvas (A/B the picture and the frame time). */
     __coastPostLive?: (on: boolean) => void;
     __coastCells?: {
@@ -281,6 +298,10 @@ export class Game {
   private navDirty = false;
   /** The look on the picture (MIS-6): the mission's at the brief, the director's after "make it noir". */
   private lookName = 'clean';
+  /** Progression (MIS-4): what the reel has unlocked, and what the player chose to wear / run from it. */
+  private unlocked: string[] = [];
+  private loadout: { outfit: string | null; pattern: string | null } = { outfit: null, pattern: null };
+  private hopSequence: HopPattern[] = [...CLASSIC_PATTERN];
   /** The post stack (W-5 post LUT): live on tiers budgeted 'full'; every tier borrows one for the cut export. */
   private post: PostStack | null = null;
   private postLoading: Promise<PostStack> | null = null;
@@ -891,6 +912,7 @@ export class Game {
       this.looks.set(n.id, { color: n.color, name: n.name });
       c.content.npcs.push(n.id);
     }
+    if (c.id === this.levelDef.level.hub) this.spawnCameos(c);
     if (content.vehicle && !this.vehicle) {
       // Parked on the flattest patch around the authored spot so it never spawns half inside a hillside (which
       // launches it); it drops onto its suspension.
@@ -1528,8 +1550,23 @@ export class Game {
         /* storage full or blocked */
       }
       this.reelStrip?.render(reel, studio.mission.id);
+      this.syncUnlocks(true);
     };
     this.reelStrip.render(studio.reel, studio.mission.id);
+    // Progression (MIS-4): the reel's unlocks, and the outfit / pattern the player last chose from them.
+    try {
+      const saved = JSON.parse(localStorage.getItem('coast:loadout') ?? 'null') as Partial<typeof this.loadout> | null;
+      if (saved) this.loadout = { outfit: saved.outfit ?? null, pattern: saved.pattern ?? null };
+    } catch {
+      /* no saved loadout */
+    }
+    this.syncUnlocks(false);
+    window.__coastUnlocks = () => ({
+      unlocked: [...this.unlocked],
+      loadout: { ...this.loadout },
+      next: nextUnlock(studio.reel)?.unlock.id ?? null,
+      hopSequence: [...this.hopSequence],
+    });
     studio.propWriter = (id, pose) => {
       if (this.props?.grabbed?.spec.id === id) return; // the player is holding it: the live hand wins
       this.props?.setPose(id, pose.pos, pose.quat);
@@ -1716,6 +1753,112 @@ export class Game {
     }
   }
 
+  // ── Progression (MIS-4) ───────────────────────────────────────────────────────────────────────────────────────
+
+  /** Recompute the reel's unlocks; announce the new ones, keep the loadout to what is unlocked, bring cameos in. */
+  private syncUnlocks(announce: boolean) {
+    const studio = this.studio;
+    if (!studio) return;
+    const now = unlocksFor(studio.reel, studio.missions);
+    const fresh = now.filter((id) => !this.unlocked.includes(id));
+    this.unlocked = now;
+    if (announce && fresh.length) {
+      this.subtitles ??= createSubtitles(document.body);
+      this.subtitles.say('Reel', `unlocked: ${fresh.map((id) => UNLOCKS[id]!.label).join(' · ')}`, 5000);
+      this.sfx.tick(1300);
+    }
+    if (this.loadout.outfit && !now.includes(this.loadout.outfit)) this.loadout.outfit = null;
+    if (this.loadout.pattern && !now.includes(this.loadout.pattern)) this.loadout.pattern = null;
+    this.applyLoadout();
+    const hub = this.cells.get(this.levelDef.level.hub);
+    if (hub?.content.spawned) this.spawnCameos(hub);
+  }
+
+  /** The cameos the reel has earned walk into the hub (with its content, so they leave and return with the cell). */
+  private spawnCameos(hub: ResidentCell) {
+    const npcs = this.npcs;
+    if (!npcs) return;
+    const spawn = hub.def.spawn ?? hub.def.origin ?? [0, 0, 0]; // world space already (worldDef)
+    for (const cameo of unlocksOfKind(this.unlocked, 'cameo')) {
+      if (npcs.byId(cameo.npc.id)) continue;
+      const home = new THREE.Vector3(spawn[0] - 2.2, 0, spawn[2] - 7.5); // by the billboard
+      npcs.spawn({ ...cameo.npc, home, approaches: true, speed: 1.2 });
+      this.looks.set(cameo.npc.id, { color: cameo.npc.color, name: cameo.npc.name });
+      hub.content.npcs.push(cameo.npc.id);
+      this.navDirty = true;
+    }
+  }
+
+  /** Wear an outfit / run a pattern from the unlocks: true, or the reason it cannot happen (what the director says back). */
+  private setLoadout(l: { outfit?: string; pattern?: string }): true | string {
+    if (l.outfit !== undefined) {
+      if (l.outfit === 'default') this.loadout.outfit = null;
+      else {
+        const u = UNLOCKS[l.outfit];
+        if (!u || u.kind !== 'outfit') return `no outfit "${l.outfit}"`;
+        if (!this.unlocked.includes(u.id)) return this.lockedLine(u.id, u.label);
+        this.loadout.outfit = u.id;
+      }
+    }
+    if (l.pattern !== undefined) {
+      if (l.pattern === 'classic') this.loadout.pattern = null;
+      else {
+        const u = UNLOCKS[l.pattern];
+        if (!u || u.kind !== 'pattern') return `no hydraulic pattern "${l.pattern}"`;
+        if (!this.unlocked.includes(u.id)) return this.lockedLine(u.id, u.label);
+        this.loadout.pattern = u.id;
+      }
+    }
+    this.applyLoadout();
+    try {
+      localStorage.setItem('coast:loadout', JSON.stringify(this.loadout));
+    } catch {
+      /* storage blocked */
+    }
+    return true;
+  }
+
+  private lockedLine(id: string, label: string): string {
+    const studio = this.studio;
+    const n = studio ? starsNeeded(id, studio.reel, studio.missions) : Infinity;
+    return Number.isFinite(n) ? `${label} is locked — ${n}★ more on the reel unlocks it` : `${label} is locked`;
+  }
+
+  /** The outfit on the body (a colour until the rigs land) and the hop sequence the beat drives. */
+  private applyLoadout() {
+    const outfit = this.loadout.outfit ? unlocksOfKind([this.loadout.outfit], 'outfit')[0] : undefined;
+    const color = outfit?.color ?? PLAYER_IDENTITY.color;
+    if (this.identity.id === PLAYER_IDENTITY.id) {
+      const body = this.playerMesh.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+      body?.material.color.setHex(color);
+    }
+    this.looks.set(PLAYER_IDENTITY.id, { color, name: PLAYER_IDENTITY.name });
+    const pattern = this.loadout.pattern ? unlocksOfKind([this.loadout.pattern], 'pattern')[0] : undefined;
+    this.hopSequence = pattern ? [...pattern.sequence] : [...CLASSIC_PATTERN];
+  }
+
+  /** Night and fog are rewards (MIS-4); noon, golden hour and blue hour are free. */
+  private timeUnlocked(preset: TimeOfDay): boolean {
+    if ((FREE_TIME_PRESETS as string[]).includes(preset)) return true;
+    const u = unlocksOfKind(this.unlocked, 'time').find((t) => t.preset === preset);
+    if (u) return true;
+    const id = Object.values(UNLOCKS).find((x) => x.kind === 'time' && x.preset === preset)?.id;
+    if (id && !this.isShot) {
+      this.subtitles ??= createSubtitles(document.body);
+      this.subtitles.say('Reel', this.lockedLine(id, UNLOCKS[id]!.label), 3500);
+    }
+    return false;
+  }
+
+  /** The 24 mm is free; 35 / 50 / 85 come off the reel (MIS-4). */
+  private lensAllowed(mm: number): boolean {
+    const { unlock } = lensFor(mm);
+    if (!unlock || this.unlocked.includes(unlock.id)) return true;
+    this.subtitles ??= createSubtitles(document.body);
+    this.subtitles.say('Reel', this.lockedLine(unlock.id, unlock.label), 3500);
+    return false;
+  }
+
   /** The look by name (MIS-6): remembered even where nothing renders it live, so the cut export gets it. */
   private setLook(name: string): boolean {
     if (!isLookName(name)) return false;
@@ -1736,7 +1879,13 @@ export class Game {
       if (id) void this.loadScene(id);
     }
     if (i.timeCycle) {
-      this.timePreset = TIME_ORDER[(TIME_ORDER.indexOf(this.timePreset) + 1) % TIME_ORDER.length]!;
+      // T cycles the presets the reel has unlocked (MIS-4: night and fog are rewards); `?time=` is free for QA.
+      let next = this.timePreset;
+      for (let k = 0; k < TIME_ORDER.length; k++) {
+        next = TIME_ORDER[(TIME_ORDER.indexOf(next) + 1) % TIME_ORDER.length]!;
+        if (this.timeUnlocked(next)) break;
+      }
+      this.timePreset = next;
       this.timeByUser = true;
       this.recolorWorld();
     }
@@ -1947,7 +2096,7 @@ export class Game {
       const now = performance.now();
       for (const b of this.beat.crossed(now)) {
         const bpb = this.beat.grid.beatsPerBar;
-        vi.hop = AUTO_HOP_PATTERN[(((b % bpb) + bpb) % bpb) % AUTO_HOP_PATTERN.length] ?? 'front';
+        vi.hop = this.hopSequence[(((b % bpb) + bpb) % bpb) % this.hopSequence.length] ?? 'front';
         this.sfx.hydraulic(HOP_CORNERS[vi.hop].length);
       }
     }
@@ -2629,6 +2778,7 @@ export class Game {
       },
       setTime: (preset) => {
         if (!(TIME_ORDER as string[]).includes(preset)) return false;
+        if (!this.timeUnlocked(preset as TimeOfDay)) return false;
         this.timePreset = preset as TimeOfDay;
         this.timeByUser = true;
         this.recolorWorld(this.timePreset);
@@ -2640,6 +2790,7 @@ export class Game {
         return true;
       },
       setLook: (name) => this.setLook(name),
+      setLoadout: (l) => this.setLoadout(l),
       possess: (id) => {
         if (!this.npcs) return false;
         if (id === 'me') {
@@ -2695,7 +2846,7 @@ export class Game {
         }
         if (req.shot) ok = this.rig.applyShot(req.shot) || ok;
         if (req.move) ok = this.rig.move(req.move, req.durationMs ?? 1500) || ok;
-        if (req.lensMm !== undefined) ok = this.rig.lens(req.lensMm) || ok;
+        if (req.lensMm !== undefined) ok = this.lensAllowed(req.lensMm) && (this.rig.lens(req.lensMm) || ok);
         if (req.path) ok = this.cameraPathOp(req.path, req.pathSeconds, req.loop) || ok;
         if (req.lookAtId) {
           const subject = feetOf(this.followId ?? 'me');

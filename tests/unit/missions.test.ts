@@ -339,7 +339,7 @@ describe('MISSION_LOW_AND_SLOW', () => {
       cell: 'valley',
       takesMax: 3,
       authoredBy: 'human',
-      reward: { stars: 3, unlock: 'lens-24mm' },
+      reward: { stars: 3, unlock: 'lens-35mm' },
     });
     // No cameraAngle constraint: a ≤0.9 m camera aimed at a standing character necessarily looks UP (a low-angle shot).
     expect(MISSION_LOW_AND_SLOW.constraints.map((c) => c.kind)).toEqual(['cameraHeight', 'subjectInFrame', 'timePreset', 'duration_s']);

@@ -382,7 +382,7 @@ TypeScript sources of truth live next to the code (`packages/engine/src/world/ce
     { "kind": "timePreset", "is": "golden" }, { "kind": "duration_s", "target": 8, "tolerance": 0.1 },
     { "kind": "beatSync", "event": "hop", "window_ms": 120 } ],
   "hints": { "cameraHeight": "camera too high — under 0.6 m", "subjectInFrame": "keep the car in frame" },
-  "reward": { "stars": 3, "unlock": "lens-24mm" }, "takesMax": 3, "authoredBy": "planner", "approvedBy": "GRATITUD3" }
+  "reward": { "stars": 3, "unlock": "lens-35mm" }, "takesMax": 3, "authoredBy": "planner", "approvedBy": "GRATITUD3" }
 ```
 ```jsonc
 // take.bin header (SCH-4) — binary; JSON header + packed body
@@ -468,7 +468,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 ### M3.5 — Vertical slice (target: 1 week) — the partner demo; the exact ID list is the scope
 - [~] CAM-1, CAM-2 (over-shoulder + orbit + locked shot on a keyframed path) ✓, CAM-3 VR diorama ✓ (pick/place write-back pending); QB-4 gate needs the device reports.
 - [x] ACT-1, ACT-2 (record/replay: root poses, world edits, moving props; bone tracks with the rigs), STU-1 (beauty, fixed-step), STU-3 (video-only MP4 export via WebCodecs + Mediabunny, R2 upload + share page; server mux pending).
-- [x] The **Photographer** NPC (placeholder rig) hands out **two hard-coded missions** (SCH-3) with the shot meter (MIS-2) and verdict (MIS-3); the billboard replays the take; the reel (MIS-4) fills bar by bar.
+- [x] The **Photographer** NPC (placeholder rig) hands out **two hard-coded missions** (SCH-3) with the shot meter (MIS-2) and verdict (MIS-3); the billboard replays the take; the reel (MIS-4) fills bar by bar; **rewards** (MIS-4, ADR-0013) ✓ — each mission's `reward.unlock` at ≥ 1★ plus a star ladder (lenses 35/50/85, night and fog, outfits, hydraulic patterns, a cameo), derived from the reel, gated in the director and on T, worn / run through `loadout`.
 - [x] Put-that-there via **mouse/touch fallback** (click object → click place) with ghost preview + undo; the typed `/` bar and browser push-to-talk drive the same acts ahead of M5 (ADR-0006).
 - [~] Golden path steps 1–5 playable end-to-end on desktop (on the sample valley); steps 1–3 on Quest 3 and iPhone pending the device pass (`pnpm dev:https`).
 

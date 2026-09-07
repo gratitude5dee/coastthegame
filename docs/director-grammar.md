@@ -85,6 +85,17 @@ The mission names the look (MIS-6) and puts it on at the brief; these words chan
 | _noir_ · _monochrome_ · _mono_               | `set_look noir`       |
 | _neon_ · _neon night_                        | `set_look neon-night` |
 
+## Loadout (any mode) — the reel's rewards (MIS-4)
+
+Outfits and hydraulic patterns come off the reel (ADR-0013); a locked one answers with its rung — _the chrome fit is locked — 5★ more on the reel unlocks it_. Lenses beyond the 24 mm (`camera { lens_mm }`) and the night / fog presets (`set_time`) are gated the same way.
+
+| Words                                                     | Act                                         |
+| --------------------------------------------------------- | ------------------------------------------- |
+| _wear the gold fit_ · _gold outfit_ · _put on the chrome_ | `loadout { outfit: outfit-gold / -chrome }` |
+| _default fit_ · _plain fit_                               | `loadout { outfit: default }`               |
+| _three-wheel motion_ · _hydraulics pancake_ · _pancake_   | `loadout { pattern: hydraulics-… }`         |
+| _classic hops_                                            | `loadout { pattern: classic }`              |
+
 ## The world (producer; _put / move_ also from director)
 
 | Say                                                                                               | Act                                                      |

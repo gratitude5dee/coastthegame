@@ -38,6 +38,8 @@ export interface SceneOps extends SceneIndex {
   setWeather(kind: WeatherKind, amount?: number): boolean;
   /** The look (post LUT) by name; false where there is no post stack or the name is unknown. */
   setLook(name: LookName): boolean;
+  /** Wear an outfit / run a hydraulic pattern from the reel's unlocks (MIS-4): true, or why not ("locked — 4★ unlocks it"). */
+  setLoadout(l: { outfit?: string; pattern?: string }): true | string;
   possess(id: string): boolean;
   playAnim(id: string, clip: string): boolean;
   replay(): boolean;
@@ -317,6 +319,10 @@ export class ActExecutor {
         return ops.setWeather(act.kind, act.amount) ? done('weather') : NOT_HERE(`${act.kind} weather`);
       case 'set_look':
         return ops.setLook(act.preset) ? done('look') : NOT_HERE(`the ${act.preset} look`);
+      case 'loadout': {
+        const r = ops.setLoadout({ ...(act.outfit ? { outfit: act.outfit } : {}), ...(act.pattern ? { pattern: act.pattern } : {}) });
+        return r === true ? done(act.outfit ?? act.pattern ?? 'loadout') : { ok: false, affected: [], confidence: 1, error: r };
+      }
       case 'play_anim': {
         const a = this.ref(act.actor, ctx);
         if (!a.id) return a.result!;

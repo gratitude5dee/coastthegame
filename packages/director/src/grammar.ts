@@ -118,6 +118,26 @@ export function parseUtterance(text: string): Utterance {
     else if ((m = /^(?:(?:go|switch|switch to|be|to) )?(actor|director|producer)(?: mode| view)?$/.exec(c))) {
       acts.push({ op: 'set_mode', mode: m[1] as RigMode });
     }
+    // ── loadout (MIS-4 unlocks): outfits and hydraulic patterns ──
+    else if (
+      (m = /^(?:(?:wear|put on|switch to|use|rock|give me|go)(?: the| my)? )?(gold|chrome|default|plain)(?: fit| outfit| look)?$/.exec(
+        c,
+      )) &&
+      /fit|outfit|wear|put on|rock/.test(c)
+    ) {
+      acts.push({ op: 'loadout', outfit: m[1] === 'default' || m[1] === 'plain' ? 'default' : `outfit-${m[1]}` });
+    } else if (
+      (m =
+        /^(?:(?:hydraulics|hydros|hop|hops|pattern|run|do|switch to|use)(?: the)? )?(three[- ]wheel(?: motion)?|pancake|classic)(?: motion| hops?| pattern)?$/.exec(
+          c,
+        ))
+    ) {
+      const w = m[1]!;
+      acts.push({
+        op: 'loadout',
+        pattern: w.startsWith('three') ? 'hydraulics-three-wheel' : w === 'pancake' ? 'hydraulics-pancake' : 'classic',
+      });
+    }
     // ── looks (MIS-6: the film stock on the picture) — before the light words: "neon night" is a look, "night" a time;
     // a bare "35mm" stays a lens (CAM-6), the look wants "35mm dusk" or a look word ("the 35mm stock") ──
     else if (
