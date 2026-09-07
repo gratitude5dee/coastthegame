@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeTake } from '../../packages/studio/src/takes';
@@ -22,6 +22,7 @@ const req = (path: string, init: RequestInit = {}, session: string | null = SESS
 
 beforeAll(async () => {
   persist = mkdtempSync(join(tmpdir(), 'coast-wrangler-'));
+  mkdirSync(join(process.cwd(), 'apps/web/dist'), { recursive: true }); // wrangler insists the assets dir exists (no build needed)
   proc = spawn(
     'pnpm',
     ['exec', 'wrangler', 'dev', '--local', '--port', String(PORT), '--ip', '127.0.0.1', '--persist-to', persist, '--log-level', 'error'],
