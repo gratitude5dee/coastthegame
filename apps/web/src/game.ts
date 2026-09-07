@@ -5,7 +5,7 @@
  * render interpolation (STU-1).
  */
 import * as THREE from 'three';
-import { SparkRenderer, SparkXr, SplatMesh, SplatFileType } from '@sparkjsdev/spark';
+import { SparkRenderer, SparkXr, SplatMesh } from '@sparkjsdev/spark';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   CameraRig,
@@ -28,8 +28,16 @@ import {
   yawOf,
   zeroVehicleInput,
   HOP_CORNERS,
+  CellStreamer,
+  Corridor,
+  LevelGraph,
+  corridorFrame,
+  cutGroundForCorridor,
+  fenceRect,
   type Cell,
   type GroundGrid,
+  type Portal,
+  type StreamEvent,
   type HopPattern,
   type PlatformInfo,
   type RigMode,
@@ -59,60 +67,33 @@ import { connectRealtime, type RealtimeSession } from './director/realtimeWebrtc
 import { createSubtitles, type Subtitles } from './ui/subtitles';
 import { createReelStrip, type ReelStrip } from './ui/reel';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
+import {
+  LEVELS,
+  LOCAL_BUTTERFLY,
+  SCENES,
+  SCENE_ORDER,
+  levelForScene,
+  soloLevel,
+  worldDef,
+  type LevelDef,
+  type SceneDef,
+} from './world/levels';
 
-export interface SceneDef {
-  title: string;
-  url: string;
-  fileType?: SplatFileType;
-  position: [number, number, number];
-  scale: number;
-  camera: { pos: [number, number, number]; lookAt: [number, number, number] };
-  world: boolean; // walkable world vs. object on a table
-  spawn?: [number, number, number];
+export type { SceneDef } from './world/levels';
+export { SCENES, SCENE_ORDER, LOCAL_BUTTERFLY } from './world/levels';
+
+/** A cell that is in the world right now (W-3): its splat, and once loaded its ground and colliders. */
+interface ResidentCell {
+  id: string;
+  def: SceneDef;
+  mesh: SplatMesh;
+  loaded: boolean;
+  ground: GroundGrid | null;
+  colliders: ReturnType<PhysicsWorld['addStaticBox']>[];
+  groundMesh: THREE.Mesh | null;
+  colliderMeshes: THREE.Object3D[];
+  cell?: Cell;
 }
-
-export const LOCAL_BUTTERFLY: SceneDef = {
-  title: 'Butterfly (local sample)',
-  url: '/samples/butterfly.spz',
-  position: [0, 0, -3],
-  scale: 1,
-  camera: { pos: [0, 0.2, 0.5], lookAt: [0, 0, -3] },
-  world: false,
-};
-
-// Spark sample assets are stored Y-down: rotate 180° about X — rotate, never mirror (W-2).
-export const SCENES: Record<string, SceneDef> = {
-  valley: {
-    title: 'Valley (Spark sample world)',
-    url: 'https://sparkjs.dev/assets/splats/valley.spz',
-    position: [0, 0, 0],
-    scale: 0.5,
-    camera: { pos: [0, 2.2, -0.5], lookAt: [0, 1.6, -8] },
-    world: true,
-    spawn: [0, 0, -1],
-  },
-  street: {
-    title: 'Snow street (Spark sample world)',
-    url: 'https://sparkjs.dev/assets/splats/snow-street.spz',
-    position: [0, 0, 0],
-    scale: 1,
-    camera: { pos: [0, 1.6, 2], lookAt: [0, 1.4, -5] },
-    world: true,
-    spawn: [0, 0, 1],
-  },
-  sutro: {
-    title: 'Sutro Tower, SF (SOGS)',
-    url: 'https://sparkjs.dev/assets/splats/sutro.zip',
-    fileType: SplatFileType.PCSOGSZIP,
-    position: [0, 0, 0],
-    scale: 1,
-    camera: { pos: [0, 1.5, 4], lookAt: [0, 1.5, 0] },
-    world: true,
-    spawn: [0, 0, 3],
-  },
-  butterfly: LOCAL_BUTTERFLY,
-};
-export const SCENE_ORDER = ['valley', 'street', 'sutro', 'butterfly'] as const;
 
 const TIME_PRESETS = {
   noon: new THREE.Color(1, 1, 1),
@@ -182,6 +163,17 @@ declare global {
       height?: number;
       bars?: [number, number];
     }) => Promise<{ bytes: number; mime: string; codec: string; ext: string; frames: number; seconds: number }>;
+    /** QA: put the player's feet somewhere (the streaming harness walks the level this way). */
+    __coastTeleport?: (x: number, y: number, z: number) => boolean;
+    __coastCells?: {
+      active: string;
+      resident: string[];
+      loaded: string[];
+      nearest: { to: string; distance: number } | null;
+      corridors: number;
+      /** Road ends walled off because the cell there has no ground (yet, or any more). */
+      gates: number;
+    };
     __coastGround?: {
       minX: number;
       minZ: number;
@@ -207,6 +199,7 @@ export class Game {
   private readonly isShot: boolean;
   private readonly freezeT: number;
   private readonly forcePhysics: boolean;
+  private readonly lod: boolean;
   private readonly perf;
   private providers: InputProvider[] = [];
   private kbm: KeyboardMouseProvider;
@@ -229,7 +222,13 @@ export class Game {
   private readonly headQuat = new THREE.Quaternion();
   private input: FrameInput = newFrameInput();
 
-  private splat: SplatMesh | null = null;
+  /** Resident cells of the level (W-3): the active one plus, at most, its nearest neighbour; loading and loaded alike. */
+  private readonly cells = new Map<string, ResidentCell>();
+  private levelDef: LevelDef = soloLevel('valley', SCENES.valley!);
+  private graph: LevelGraph | null = null;
+  private streamer: CellStreamer | null = null;
+  /** Transitions in the world, keyed by their undirected edge. */
+  private readonly corridors = new Map<string, Corridor>();
   private sceneDef: SceneDef = LOCAL_BUTTERFLY;
   private currentSceneId = 'valley';
   private cellId: string | null = null;
@@ -254,9 +253,6 @@ export class Game {
   private autoHop = false;
   private pendingBeat: { event: NonNullable<MeterSample['beatEvent']>; phaseMs: number } | null = null;
   private verdictAt = 0;
-  private ground: GroundGrid | null = null;
-  private groundMesh: THREE.Mesh | null = null; // invisible raycast target + optional debug wireframe
-  private colliderMeshes: THREE.Object3D[] = [];
   private playerMesh: THREE.Group;
   private debug = false;
   private physicsReady = false;
@@ -310,6 +306,7 @@ export class Game {
     this.isShot = params.has('shot');
     this.freezeT = Number(params.get('t') ?? '0');
     this.forcePhysics = params.get('physics') === '1';
+    this.lod = params.get('lod') !== '0'; // `?lod=0`: skip the LoD build (QA on slow machines; the ground estimator copes)
 
     this.camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.05, 2000);
     this.sfx = new Sfx(this.camera, { muted: params.get('mute') === '1' || this.isShot });
@@ -332,6 +329,13 @@ export class Game {
     this.scene.add(this.spark, this.world, this.localFrame);
     performance.mark('coast:boot');
     window.__coastGame = this; // harness / console handle (read-only by convention)
+    window.__coastTeleport = (x, y, z) => {
+      if (!this.character) return false;
+      this.exitVehicle();
+      this.character.teleport(new THREE.Vector3(x, y, z));
+      this.placeXrFrameNow();
+      return true;
+    };
 
     // Lights for meshes (splats are unlit); env map from the cell pano lands with M2 (W-5).
     this.scene.add(new THREE.HemisphereLight(0xfff1dc, 0x24303f, 1.1));
@@ -442,14 +446,62 @@ export class Game {
     void hud;
   }
 
-  /** Boot: pick the scene/cell from params and start the loop. */
+  /** The active cell (where the spawn, the HUD title and the perf reports point). */
+  private get active(): ResidentCell | null {
+    return this.cells.get(this.currentSceneId) ?? null;
+  }
+  private get splat(): SplatMesh | null {
+    return this.active?.mesh ?? null;
+  }
+  private get ground(): GroundGrid | null {
+    return this.active?.ground ?? null;
+  }
+  private get groundMesh(): THREE.Mesh | null {
+    return this.active?.groundMesh ?? null;
+  }
+  /** Collider GLBs of every resident cell (Marble cells; empty on the sample worlds). */
+  private get colliderMeshes(): THREE.Object3D[] {
+    const out: THREE.Object3D[] = [];
+    for (const c of this.cells.values()) out.push(...c.colliderMeshes);
+    return out;
+  }
+
+  /**
+   * Ground height at a world XZ across everything resident (W-3): the highest of the cell grounds that cover the
+   * point (inside their fence rectangles — beyond those the grid is hole-filled guesswork) and the roads between
+   * cells; the active cell's grid, clamped, when nothing covers it.
+   */
+  private heightAt(x: number, z: number): number {
+    let best = -Infinity;
+    for (const c of this.cells.values()) {
+      if (!c.ground) continue;
+      const r = fenceRect(c.ground);
+      if (x < r.minX || x > r.maxX || z < r.minZ || z > r.maxZ) continue;
+      best = Math.max(best, groundHeightAt(c.ground, x, z));
+    }
+    for (const road of this.corridors.values()) {
+      const h = road.frame.heightAt(x, z);
+      if (h !== null) best = Math.max(best, h);
+    }
+    if (Number.isFinite(best)) return best;
+    const a = this.ground;
+    return a ? groundHeightAt(a, x, z) : 0;
+  }
+
+  /** Time of day is a grade on every resident splat (W-5 placeholder). */
+  private recolorWorld(preset: TimePreset = this.timePreset) {
+    for (const c of this.cells.values()) c.mesh.recolor.copy(TIME_PRESETS[preset]);
+  }
+
+  /** Boot: pick the level / scene / cell from params and start the loop. */
   async start() {
     const p = this.opts.params;
     const cell = p.get('cell');
     if (cell) await this.loadCell(cell);
     else {
-      const sceneId = p.get('scene') ?? (this.isShot ? 'butterfly' : 'valley');
-      await this.loadScene(sceneId in SCENES ? sceneId : 'valley');
+      const level = p.get('level');
+      const sceneId = p.get('scene') ?? (this.isShot ? 'butterfly' : level && LEVELS[level] ? LEVELS[level].level.hub : 'valley');
+      await this.loadScene(sceneId, level ?? undefined);
     }
     this.renderer.setAnimationLoop((time) => this.tick(time));
   }
@@ -470,11 +522,11 @@ export class Game {
   }
 
   private clearWorld() {
-    if (this.splat) {
-      this.world.remove(this.splat);
-      this.splat.dispose();
-      this.splat = null;
-    }
+    for (const id of [...this.cells.keys()]) this.unloadCell(id);
+    for (const road of this.corridors.values()) road.dispose();
+    this.corridors.clear();
+    this.graph = null;
+    this.streamer = null;
     this.painter?.dispose();
     this.painter = null;
     this.spraying = false;
@@ -498,14 +550,6 @@ export class Game {
       this.world.remove(this.props.group, this.props.ghost);
       this.props = null;
     }
-    if (this.groundMesh) {
-      this.world.remove(this.groundMesh);
-      this.groundMesh.geometry.dispose();
-      this.groundMesh = null;
-    }
-    for (const m of this.colliderMeshes) this.world.remove(m);
-    this.colliderMeshes = [];
-    this.ground = null;
     this.physics?.dispose();
     this.physics = null;
     this.playerMesh.visible = false;
@@ -525,6 +569,7 @@ export class Game {
     this.deixis.clear();
     window.__coastPhysics = false;
     window.__coastSteps = 0;
+    this.syncCellsHook();
   }
 
   private beginLoad(title: string, withPhysics: boolean) {
@@ -541,36 +586,39 @@ export class Game {
     this.loadingScreen?.progress('fetch', e.lengthComputable && e.total > 0 ? Math.min(0.98, e.loaded / e.total) : 0.5);
   };
 
-  async loadScene(id: string) {
-    let def = SCENES[id] ?? LOCAL_BUTTERFLY;
+  /**
+   * Load the level a scene belongs to with that scene as the active cell (W-3): `?level=` names one explicitly,
+   * otherwise the sample strip when the scene is one of its cells, else a one-cell level. Off the network, the local
+   * butterfly stands in.
+   */
+  async loadScene(id: string, levelId?: string) {
+    let levelDef = levelId && LEVELS[levelId] ? LEVELS[levelId] : levelForScene(id);
+    if (!levelDef.level.cells.includes(id)) id = levelDef.level.hub;
     this.usingFallback = false;
-    if (!(await this.reachable(def.url))) {
-      def = LOCAL_BUTTERFLY;
+    if (!(await this.reachable(levelDef.cells[id]!.url))) {
+      levelDef = soloLevel('butterfly', LOCAL_BUTTERFLY);
+      id = 'butterfly';
       this.usingFallback = true;
     }
     this.clearWorld();
+    this.levelDef = levelDef;
+    this.graph = new LevelGraph(
+      levelDef.level,
+      Object.fromEntries(Object.entries(levelDef.cells).map(([cid, d]) => [cid, { id: cid, transitions: d.transitions ?? [] }])),
+    );
+    this.streamer = new CellStreamer(this.graph, id, { residentCells: this.budgets.residentCells });
     this.cellId = null;
     this.currentSceneId = id;
+    const def = worldDef(levelDef, id);
     this.sceneDef = def;
     this.beginLoad(def.title, !this.isShot && (def.world || this.forcePhysics));
-    const mesh = new SplatMesh({
-      url: def.url,
-      ...(def.fileType ? { fileType: def.fileType } : {}), // never pass fileType: undefined (breaks auto-detect)
-      lod: true,
-      onProgress: this.onFetchProgress,
-      onLoad: () => this.onWorldLoaded(def),
-    });
-    mesh.quaternion.set(1, 0, 0, 0);
-    mesh.position.set(...def.position);
-    mesh.scale.setScalar(def.scale);
-    mesh.recolor.copy(TIME_PRESETS[this.timePreset]);
-    this.world.add(mesh);
-    this.splat = mesh;
+    this.addCellSplat(id, def, true);
     this.placeCamera(def);
     this.perf.setCell(id);
+    this.syncCellsHook();
   }
 
-  /** Marble cell (goal.md W-2): /cells/<id>/cell.json with spz + collider GLB + pano. */
+  /** Marble cell (goal.md W-2): /cells/<id>/cell.json with spz + collider GLB + pano — a one-cell level for now. */
   async loadCell(id: string) {
     let cell: Cell;
     try {
@@ -594,19 +642,74 @@ export class Game {
       camera: { pos: [spawn[0], spawn[1] + 2, spawn[2] + 2], lookAt: [spawn[0], spawn[1] + 1.5, spawn[2] - 6] },
       world: true,
       spawn,
+      transitions: [],
     };
+    this.levelDef = soloLevel(id, def);
+    this.graph = new LevelGraph(this.levelDef.level, { [id]: { id, transitions: [] } });
+    this.streamer = new CellStreamer(this.graph, id, { residentCells: this.budgets.residentCells });
     this.sceneDef = def;
     this.beginLoad(def.title, !this.isShot);
+    const resident = this.addCellSplat(id, def, true, cell);
     const e = cell.transform.rotationEuler;
-    const mesh = new SplatMesh({ url: def.url, lod: true, onProgress: this.onFetchProgress, onLoad: () => this.onWorldLoaded(def, cell) });
-    mesh.rotation.set(THREE.MathUtils.degToRad(e[0]), THREE.MathUtils.degToRad(e[1]), THREE.MathUtils.degToRad(e[2]));
+    resident.mesh.rotation.set(THREE.MathUtils.degToRad(e[0]), THREE.MathUtils.degToRad(e[1]), THREE.MathUtils.degToRad(e[2]));
+    this.placeCamera(def);
+    this.perf.setCell(id);
+    this.syncCellsHook();
+  }
+
+  /**
+   * Put a cell's splat in the world at its placement (W-3). The first cell of a level drives the loading screen and
+   * boots physics when it lands; a streamed neighbour arrives quietly and joins the physics world on load.
+   */
+  private addCellSplat(id: string, def: SceneDef, first: boolean, cell?: Cell): ResidentCell {
+    const mesh = new SplatMesh({
+      url: def.url,
+      ...(def.fileType ? { fileType: def.fileType } : {}), // never pass fileType: undefined (breaks auto-detect)
+      lod: this.lod,
+      ...(first ? { onProgress: this.onFetchProgress } : {}),
+      onLoad: () => (first ? this.onWorldLoaded(resident) : this.onCellLoaded(resident)),
+    });
+    mesh.quaternion.set(1, 0, 0, 0); // Spark sample assets are stored Y-down: rotate 180° about X — rotate, never mirror (W-2)
     mesh.position.set(...def.position);
     mesh.scale.setScalar(def.scale);
     mesh.recolor.copy(TIME_PRESETS[this.timePreset]);
     this.world.add(mesh);
-    this.splat = mesh;
-    this.placeCamera(def);
-    this.perf.setCell(id);
+    const resident: ResidentCell = {
+      id,
+      def,
+      mesh,
+      loaded: false,
+      ground: null,
+      colliders: [],
+      groundMesh: null,
+      colliderMeshes: [],
+      ...(cell ? { cell } : {}),
+    };
+    this.cells.set(id, resident);
+    return resident;
+  }
+
+  /** Take a cell out of the world: splat, ground, fence, and the roads that no resident cell needs any more. */
+  private unloadCell(id: string) {
+    const c = this.cells.get(id);
+    if (!c) return;
+    this.cells.delete(id);
+    this.world.remove(c.mesh);
+    c.mesh.dispose();
+    if (this.physics && c.colliders.length) this.physics.removeColliders(c.colliders);
+    if (c.groundMesh) {
+      this.world.remove(c.groundMesh);
+      c.groundMesh.geometry.dispose();
+    }
+    for (const m of c.colliderMeshes) this.world.remove(m);
+    for (const [key, road] of this.corridors) {
+      const [a, b] = key.split('|') as [string, string];
+      if (!this.cells.has(a) && !this.cells.has(b)) {
+        road.dispose();
+        this.corridors.delete(key);
+      }
+    }
+    this.syncGates();
   }
 
   private placeCamera(def: SceneDef) {
@@ -618,44 +721,227 @@ export class Game {
     this.rig.pitch = 0;
   }
 
-  private onWorldLoaded(def: SceneDef, cell?: Cell) {
+  private onWorldLoaded(resident: ResidentCell) {
+    resident.loaded = true;
     this.loading = '';
     if (!performance.getEntriesByName('coast:interactive').length) performance.mark('coast:interactive'); // QB-3
     window.__coastReady = true;
     this.loadingScreen?.progress('fetch', 1);
     this.painter = new SplatPainter(this.world, { maxSdfs: this.budgets.maxPaintSdfs });
     window.__coastPaint = { count: 0, strokes: 0 };
-    if (!this.isShot && (def.world || this.forcePhysics)) void this.initPhysics(def, cell);
+    const def = resident.def;
+    if (!this.isShot && (def.world || this.forcePhysics)) void this.initPhysics(resident);
+  }
+
+  /** A streamed neighbour's splat landed: give it ground + fence, open the road's gate, tell the streamer. */
+  private onCellLoaded(resident: ResidentCell) {
+    if (!this.cells.has(resident.id)) return; // unloaded while downloading
+    resident.loaded = true;
+    if (this.physics && this.physicsReady) {
+      this.ensureCorridors();
+      this.buildCellGround(resident, this.physics);
+      this.streamer?.markLoaded(resident.id);
+      this.syncGates();
+    }
+    this.subtitles?.say('Set', `${resident.def.title} is in`, 2500);
+    this.syncCellsHook();
+  }
+
+  // ── Streaming (W-3) ───────────────────────────────────────────────────────────────────────────────────────────
+
+  private edgeKey(a: string, b: string) {
+    return [a, b].sort().join('|');
+  }
+
+  /** Every road out of a resident cell exists (colliders included), so a cell's ground can be cut for it. */
+  private ensureCorridors() {
+    const graph = this.graph;
+    const physics = this.physics;
+    if (!graph || !physics) return;
+    for (const id of this.cells.keys()) {
+      for (const exit of graph.exitsOf(id)) {
+        const key = this.edgeKey(exit.from, exit.to);
+        if (this.corridors.has(key)) continue;
+        const back = graph.portal(exit.to, exit.from)!;
+        const a = this.doorwayFloor(exit);
+        const b = this.doorwayFloor(back);
+        const fogColor = this.scene.background instanceof THREE.Color ? this.scene.background : 0xb9c4d2;
+        this.corridors.set(key, new Corridor(corridorFrame(a, b, 6, 1), { a: exit.from, b: exit.to }, this.world, physics, { fogColor }));
+        for (const c of this.cells.values()) if (c.ground) this.recutCell(c, physics);
+      }
+    }
+    this.syncGates();
+  }
+
+  /**
+   * Roads touching a cell were built on its authored doorway heights; now that its ground is derived, rebuild them
+   * end-snapped (and re-cut the neighbour at the other end, whose cut only ever deepens).
+   */
+  private rebuildCorridorsFor(id: string, physics: PhysicsWorld) {
+    const graph = this.graph;
+    if (!graph) return;
+    for (const [key, road] of [...this.corridors]) {
+      if (road.ends.a !== id && road.ends.b !== id) continue;
+      const exit = graph.portal(road.ends.a, road.ends.b);
+      const back = graph.portal(road.ends.b, road.ends.a);
+      if (!exit || !back) continue;
+      road.dispose();
+      const fogColor = this.scene.background instanceof THREE.Color ? this.scene.background : 0xb9c4d2;
+      this.corridors.set(
+        key,
+        new Corridor(corridorFrame(this.doorwayFloor(exit), this.doorwayFloor(back), 6, 1), road.ends, this.world, physics, { fogColor }),
+      );
+      const other = this.cells.get(road.ends.a === id ? road.ends.b : road.ends.a);
+      if (other?.ground) this.recutCell(other, physics);
+    }
+  }
+
+  /** A doorway's floor, snapped to the cell's derived ground when that ground exists (authored heights are approximate). */
+  private doorwayFloor(portal: Portal): [number, number, number] {
+    const c = this.cells.get(portal.from);
+    const [x, y, z] = portal.floor;
+    if (c?.ground) return [x, groundHeightAt(c.ground, x, z), z];
+    return [x, y, z];
+  }
+
+  /** Gates stand at any road end whose cell has no ground yet (or is gone). */
+  private syncGates() {
+    for (const road of this.corridors.values()) {
+      road.setGate('a', !this.cells.get(road.ends.a)?.ground);
+      road.setGate('b', !this.cells.get(road.ends.b)?.ground);
+    }
+  }
+
+  /** Ground + fence for a sample cell from its splats (or the cell collider GLB), cut for every road that touches it. */
+  private buildCellGround(c: ResidentCell, physics: PhysicsWorld) {
+    if (c.ground || c.colliders.length) return;
+    const def = c.def;
+    const spawnXZ = new THREE.Vector3(...(def.spawn ?? def.position));
+    c.ground = groundFromSplats(c.mesh, { center: spawnXZ, halfExtent: def.groundHalfExtent ?? 40, cellSize: 0.75 });
+    this.rebuildCorridorsFor(c.id, physics);
+    this.recutCell(c, physics);
+    if (c.id === this.currentSceneId) {
+      window.__coastGround = {
+        minX: c.ground.minX,
+        minZ: c.ground.minZ,
+        cols: c.ground.cols,
+        cellSize: c.ground.cellSize,
+        coverage: c.ground.coverage,
+        sampled: c.ground.sampled ?? 0,
+      };
+    }
+  }
+
+  /** (Re)build a cell's ground collider + fence after cutting its grid for the roads that touch it. */
+  private recutCell(c: ResidentCell, physics: PhysicsWorld) {
+    if (!c.ground) return;
+    const openings = [];
+    for (const [key, road] of this.corridors) {
+      if (!key.split('|').includes(c.id)) continue;
+      cutGroundForCorridor(c.ground, road.frame);
+      openings.push(road.frame.footprint);
+    }
+    if (c.colliders.length) physics.removeColliders(c.colliders);
+    c.colliders = [];
+    if (c.groundMesh) {
+      this.world.remove(c.groundMesh);
+      c.groundMesh.geometry.dispose();
+      c.groundMesh = null;
+    }
+    const rect = fenceRect(c.ground, 1.5);
+    const { collider, geometry } = physics.addGroundGrid(c.ground, rect);
+    c.colliders.push(collider, ...physics.addFence(c.ground, 4, 1.5, openings)); // the block ends where the scan ends
+    c.groundMesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({ color: 0x3fd0ff, wireframe: true, transparent: true, opacity: 0.35 }),
+    );
+    c.groundMesh.visible = this.debug;
+    this.world.add(c.groundMesh);
+  }
+
+  /** Per frame: feed the player's position to the streamer and act on what it decides. */
+  private updateStreaming(feet: THREE.Vector3) {
+    const s = this.streamer;
+    if (!s || !this.physicsReady) return;
+    for (const ev of s.update(feet)) this.onStreamEvent(ev);
+    if (this.frame % 15 === 0) this.syncCellsHook();
+  }
+
+  private onStreamEvent(ev: StreamEvent) {
+    const graph = this.graph;
+    if (!graph) return;
+    if (ev.kind === 'load') {
+      if (this.cells.has(ev.cell)) return;
+      const def = worldDef(this.levelDef, ev.cell);
+      this.addCellSplat(ev.cell, def, false);
+      this.ensureCorridors();
+      this.hint = `${def.title} is streaming in`;
+      performance.mark('coast:stream-load');
+    } else if (ev.kind === 'unload') {
+      this.streamer?.drop(ev.cell);
+      this.unloadCell(ev.cell);
+    } else {
+      this.setActiveCell(ev.cell);
+      performance.mark('coast:stream-arrive');
+    }
+    this.syncCellsHook();
+  }
+
+  /** The player walked into another cell: it owns the spawn, the HUD title and the perf reports from here on. */
+  private setActiveCell(id: string) {
+    const c = this.cells.get(id);
+    if (!c) return;
+    this.currentSceneId = id;
+    this.sceneDef = c.def;
+    this.perf.setCell(id);
+    this.subtitles?.say('Set', `${c.def.title}`, 3000);
+    this.updateHint();
+  }
+
+  private syncCellsHook() {
+    const s = this.streamer;
+    const feet = this.character?.feet(this.tmpV);
+    const nearest = s && feet ? s.nearest(feet) : null;
+    window.__coastCells = {
+      active: this.currentSceneId,
+      resident: [...this.cells.keys()],
+      loaded: [...this.cells.values()].filter((c) => c.loaded && c.ground).map((c) => c.id),
+      nearest: nearest ? { to: nearest.portal.to, distance: Math.round(nearest.distance * 10) / 10 } : null,
+      corridors: this.corridors.size,
+      gates: [...this.corridors.values()].reduce((n, r) => n + (r.gateClosed('a') ? 1 : 0) + (r.gateClosed('b') ? 1 : 0), 0),
+    };
   }
 
   // ── Physics / character / props ────────────────────────────────────────────────────────────────────────────
 
-  private async initPhysics(def: SceneDef, cell?: Cell) {
+  private async initPhysics(resident: ResidentCell) {
     const gen = ++this.physicsGen;
     const R = await loadRapier();
-    if (gen !== this.physicsGen || !this.splat) return; // scene changed while loading
+    if (gen !== this.physicsGen || !this.cells.has(resident.id)) return; // scene changed while loading
     this.loadingScreen?.progress('physics', 0.35);
     const physics = new PhysicsWorld(R);
     this.physics = physics;
+    const def = resident.def;
+    const cell = resident.cell;
 
     let colliderLoaded = false;
     if (cell?.assets.collider) {
       try {
         const gltf = await new GLTFLoader().loadAsync(cell.assets.collider);
         if (gen !== this.physicsGen) return;
-        gltf.scene.rotation.copy(this.splat.rotation);
-        gltf.scene.position.copy(this.splat.position);
-        gltf.scene.scale.copy(this.splat.scale);
+        gltf.scene.rotation.copy(resident.mesh.rotation);
+        gltf.scene.position.copy(resident.mesh.position);
+        gltf.scene.scale.copy(resident.mesh.scale);
         gltf.scene.updateMatrixWorld(true);
         gltf.scene.traverse((o) => {
           if ((o as THREE.Mesh).isMesh) {
             const m = o as THREE.Mesh;
-            physics.addStaticTrimesh(m.geometry, m.matrixWorld);
+            resident.colliders.push(physics.addStaticTrimesh(m.geometry, m.matrixWorld));
             m.visible = false;
           }
         });
         this.world.add(gltf.scene);
-        this.colliderMeshes.push(gltf.scene);
+        resident.colliderMeshes.push(gltf.scene);
         colliderLoaded = true;
       } catch (e) {
         console.warn('collider GLB failed, deriving ground from splats', e);
@@ -663,29 +949,15 @@ export class Game {
     }
 
     const spawnXZ = new THREE.Vector3(...(def.spawn ?? [0, 0, 0]));
-    if (!colliderLoaded) {
-      // Ground from the splats themselves (PHY-1 fallback). Centre the grid on the spawn.
-      this.ground = groundFromSplats(this.splat, { center: spawnXZ, halfExtent: 40, cellSize: 0.75 });
-      const { geometry } = physics.addGroundGrid(this.ground);
-      physics.addFence(this.ground, 4); // the block ends where the scan ends — nobody drives off the world
-      window.__coastGround = {
-        minX: this.ground.minX,
-        minZ: this.ground.minZ,
-        cols: this.ground.cols,
-        cellSize: this.ground.cellSize,
-        coverage: this.ground.coverage,
-        sampled: this.ground.sampled ?? 0,
-      };
-      this.groundMesh = new THREE.Mesh(
-        geometry,
-        new THREE.MeshBasicMaterial({ color: 0x3fd0ff, wireframe: true, transparent: true, opacity: 0.35 }),
-      );
-      this.groundMesh.visible = this.debug;
-      this.world.add(this.groundMesh);
-    }
+    // Roads out of this cell first (their footprints cut the ground), then the ground from the splats themselves
+    // (PHY-1 fallback), centred on the spawn, fenced where the scan ends — with the roads' doorways left open (W-3).
+    this.ensureCorridors();
+    if (!colliderLoaded) this.buildCellGround(resident, physics);
+    // Any neighbour that landed while Rapier was loading joins now.
+    for (const c of this.cells.values()) if (c !== resident && c.loaded && !c.ground) this.buildCellGround(c, physics);
 
     this.loadingScreen?.progress('physics', 0.7);
-    const spawnY = this.ground ? groundHeightAt(this.ground, spawnXZ.x, spawnXZ.z) : spawnXZ.y;
+    const spawnY = this.ground ? this.heightAt(spawnXZ.x, spawnXZ.z) : spawnXZ.y;
     const feet = new THREE.Vector3(spawnXZ.x, spawnY + 0.3, spawnXZ.z);
     this.character = new CharacterController(physics, { start: feet, yaw: this.rig.yaw });
 
@@ -750,6 +1022,9 @@ export class Game {
 
     this.physicsReady = true;
     window.__coastPhysics = true;
+    for (const c of this.cells.values()) if (c.ground) this.streamer?.markLoaded(c.id);
+    this.syncGates();
+    this.syncCellsHook();
     this.loadingScreen?.progress('physics', 1);
     this.updateHint();
     const say = this.opts.params.get('say');
@@ -912,7 +1187,7 @@ export class Game {
     const ch = this.character;
     if (!car || !ch || !this.driving) return;
     const out = car.exitPoint(new THREE.Vector3());
-    if (this.ground) out.y = groundHeightAt(this.ground, out.x, out.z) + 0.3;
+    if (this.ground) out.y = this.heightAt(out.x, out.z) + 0.3;
     ch.setActive(true);
     ch.teleport(out);
     ch.yaw = car.yaw;
@@ -926,7 +1201,7 @@ export class Game {
     this.placeCamera(this.sceneDef);
     if (this.character) {
       const s = this.sceneDef.spawn ?? [0, 0, 0];
-      const y = this.ground ? groundHeightAt(this.ground, s[0], s[2]) : s[1];
+      const y = this.ground ? this.heightAt(s[0], s[2]) : s[1];
       this.character.teleport(new THREE.Vector3(s[0], y + 0.3, s[2]));
     }
     if (this.vehicle && this.vehicleSpawn) this.vehicle.teleport(this.vehicleSpawn.pos, this.vehicleSpawn.yaw);
@@ -1002,7 +1277,7 @@ export class Game {
 
     // Billboard: "your cut plays here" until a take exists, then the recorded clip (VideoTexture).
     const bbPos = feet.clone().addScaledVector(f, 6.5).addScaledVector(right, -2.2);
-    bbPos.y = (this.ground ? groundHeightAt(this.ground, bbPos.x, bbPos.z) : feet.y) + 1.9;
+    bbPos.y = (this.ground ? this.heightAt(bbPos.x, bbPos.z) : feet.y) + 1.9;
     const canvas = document.createElement('canvas');
     canvas.width = 640;
     canvas.height = 360;
@@ -1129,7 +1404,7 @@ export class Game {
   private groundDelta(feet: THREE.Vector3, f: THREE.Vector3, fwd: number, right: THREE.Vector3, side: number): number {
     if (!this.ground) return 0;
     const p = feet.clone().addScaledVector(f, fwd).addScaledVector(right, side);
-    return groundHeightAt(this.ground, p.x, p.z) - feet.y + 0.3;
+    return this.heightAt(p.x, p.z) - feet.y + 0.3;
   }
 
   // ── Frame ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1184,7 +1459,7 @@ export class Game {
     }
     if (i.timeCycle) {
       this.timePreset = TIME_ORDER[(TIME_ORDER.indexOf(this.timePreset) + 1) % TIME_ORDER.length]!;
-      this.splat?.recolor.copy(TIME_PRESETS[this.timePreset]);
+      this.recolorWorld();
     }
     if (i.modeCycle) {
       if (this.inXr) {
@@ -1214,7 +1489,7 @@ export class Game {
     }
     if (i.debugToggle) {
       this.debug = !this.debug;
-      if (this.groundMesh) this.groundMesh.visible = this.debug;
+      for (const c of this.cells.values()) if (c.groundMesh) c.groundMesh.visible = this.debug;
       for (const m of this.colliderMeshes) m.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).visible = this.debug) : null));
     }
     if (i.resetEdge) this.respawn();
@@ -1427,6 +1702,7 @@ export class Game {
       if (this.frame % 10 === 0) this.syncNpcHook();
     }
     if (this.rig.mode === 'actor' && !driving && !this.inXr) ch.yaw = this.rig.yaw;
+    this.updateStreaming(driving ? this.carFeet(this.tmpV) : ch.feet(this.tmpV));
     this.props?.sync(physics.alpha);
     this.vehicle?.sync(physics.alpha);
     if (this.vehicle) {
@@ -1470,7 +1746,7 @@ export class Game {
       if (this.rig.mode === 'actor') this.rig.yaw += dYaw;
       this.rig.update(dt, this.camera, { feet, yaw: carYaw, eyeHeight: CAR_EYE_HEIGHT, followScale: CAR_FOLLOW }, look);
       if (this.ground && this.rig.mode !== 'actor') {
-        const minY = groundHeightAt(this.ground, this.camera.position.x, this.camera.position.z) + 0.25;
+        const minY = this.heightAt(this.camera.position.x, this.camera.position.z) + 0.25;
         if (this.camera.position.y < minY) this.camera.position.y = minY;
       }
       this.playerMesh.visible = false;
@@ -1481,7 +1757,7 @@ export class Game {
       else this.rig.update(dt, this.camera, { feet, yaw: ch.yaw, eyeHeight: EYE_HEIGHT }, look);
       // Keep follow cameras above the terrain (low-angle shots may dip, never clip through the ground).
       if (this.ground && this.rig.mode !== 'actor') {
-        const minY = groundHeightAt(this.ground, this.camera.position.x, this.camera.position.z) + 0.25;
+        const minY = this.heightAt(this.camera.position.x, this.camera.position.z) + 0.25;
         if (this.camera.position.y < minY) this.camera.position.y = minY;
       }
       this.playerMesh.visible = this.rig.mode !== 'actor';
@@ -1533,8 +1809,9 @@ export class Game {
   private groundHit(ray: THREE.Ray): THREE.Vector3 | null {
     this.raycaster.ray.copy(ray);
     const targets: THREE.Object3D[] = [];
-    if (this.groundMesh) targets.push(this.groundMesh);
+    for (const c of this.cells.values()) if (c.groundMesh) targets.push(c.groundMesh);
     for (const m of this.colliderMeshes) targets.push(m);
+    for (const road of this.corridors.values()) targets.push(road.road);
     const hits = this.raycaster.intersectObjects(targets, true);
     return hits[0]?.point ?? null;
   }
@@ -1574,7 +1851,7 @@ export class Game {
     // slip between thin ground splats) or the physics ground / collider (solid, so the floor always takes paint).
     this.raycaster.ray.copy(ray);
     const hits: THREE.Intersection[] = [];
-    this.splat.raycast(this.raycaster, hits);
+    for (const c of this.cells.values()) if (c.loaded) c.mesh.raycast(this.raycaster, hits);
     hits.sort((a, b) => a.distance - b.distance);
     let point = hits[0]?.point ?? null;
     const ground = this.groundHit(ray);
@@ -1919,7 +2196,7 @@ export class Game {
         const prop = propOf(id);
         if (props && prop) {
           const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
-          if (this.ground) p.y = Math.max(p.y, groundHeightAt(this.ground, p.x, p.z));
+          if (this.ground) p.y = Math.max(p.y, this.heightAt(p.x, p.z));
           props.select(prop);
           props.placeSelectedAt(p);
           this.studio?.edit(now(), { kind: 'propPlace', propId: id, pos: [p.x, p.y, p.z] });
@@ -1928,7 +2205,7 @@ export class Game {
         }
         if (id === 'lowrider' && this.vehicle && !this.driving) {
           const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
-          if (this.ground) p.y = groundHeightAt(this.ground, p.x, p.z);
+          if (this.ground) p.y = this.heightAt(p.x, p.z);
           this.vehicle.teleport(p.add(new THREE.Vector3(0, 1.2, 0)), this.vehicle.yaw);
           return true;
         }
@@ -1974,7 +2251,7 @@ export class Game {
         const yaw = new THREE.Euler().setFromQuaternion(prop.mesh.quaternion, 'YXZ').y;
         const spec: PropSpec = { ...prop.spec, size: prop.spec.size.map((v) => v * factor), mass: (prop.spec.mass ?? 1) * factor ** 3 };
         props.remove(id);
-        const base = this.ground ? groundHeightAt(this.ground, t.x, t.z) : t.y - 0.5;
+        const base = this.ground ? this.heightAt(t.x, t.z) : t.y - 0.5;
         props.spawn(spec, new THREE.Vector3(t.x, base + (spec.size[1] ?? spec.size[0] ?? 0.3) + 0.05, t.z), yaw);
         return true;
       },
@@ -2007,7 +2284,7 @@ export class Game {
         if (!props || !key) return null;
         const spec = { ...ASSETS[key]!, id: props.nextId(key.replace(/\s+/g, '')) };
         const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
-        if (this.ground) p.y = groundHeightAt(this.ground, p.x, p.z);
+        if (this.ground) p.y = this.heightAt(p.x, p.z);
         p.y += (spec.size[1] ?? spec.size[0] ?? 0.3) + 0.3;
         props.spawn(spec, p);
         this.sfx.tick(1100);
@@ -2018,7 +2295,7 @@ export class Game {
         const t = map[preset];
         if (!t) return false;
         this.timePreset = t;
-        this.splat?.recolor.copy(TIME_PRESETS[t]);
+        this.recolorWorld(t);
         return true;
       },
       setWeather: () => false, // fog volumes / rain land with the Marble cells (M2, W-5)
@@ -2141,7 +2418,7 @@ export class Game {
     const car = this.driving ? this.vehicle : null;
     const feet = car ? this.carFeet(new THREE.Vector3()).clone() : ch.feet(new THREE.Vector3());
     const camPos = this.camera.getWorldPosition(new THREE.Vector3());
-    const camH = this.ground ? camPos.y - groundHeightAt(this.ground, camPos.x, camPos.z) : camPos.y - feet.y;
+    const camH = this.ground ? camPos.y - this.heightAt(camPos.x, camPos.z) : camPos.y - feet.y;
     const subject = this.studio?.subjectId ?? 'crate_1';
     return {
       nowMs: performance.now(),
@@ -2229,6 +2506,18 @@ export class Game {
     else this.hint = 'overhead: drag to orbit · wheel zoom · click a prop, then click where it goes · / say "put that there"';
   }
 
+  /** "cells valley + street (loading) · → street 12 m" once the level has more than one cell (W-3). */
+  private streamingHud(): string {
+    const s = this.streamer;
+    if (!s || this.levelDef.level.cells.length < 2) return '';
+    const resident = [...this.cells.values()].map((c) =>
+      c.id === this.currentSceneId ? `<b>${c.id}</b>` : c.ground ? c.id : `${c.id} (loading)`,
+    );
+    const feet = this.character ? this.character.feet(this.tmpV2) : null;
+    const near = feet ? s.nearest(feet) : null;
+    return ` · cells ${resident.join(' + ')}` + (near ? ` · → ${near.portal.to} ${near.distance.toFixed(0)} m` : '');
+  }
+
   private renderHud() {
     const sorted = [...this.frameTimes].sort((a, b) => a - b);
     const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? 0;
@@ -2245,6 +2534,7 @@ export class Game {
         ? ` · lowrider ${Math.round(Math.abs(this.vehicle.speed) * 3.6)} km/h · ${this.vehicle.wheelsOnGround}/4 wheels down`
         : '') +
       (this.autoHop ? ` · beat ● ${this.beat.phase(performance.now()).bar + 1}.${this.beat.phase(performance.now()).beatInBar + 1}` : '') +
+      this.streamingHud() +
       `<br>mode <b>${this.rig.mode}</b> (Tab) · time <b>${this.timePreset}</b> (T) · / direct · scenes 1–4 · C collider · R reset · M ${this.sfx.isMuted ? 'unmute' : 'mute'}<br><span style="opacity:.8">${this.hint}</span>`;
   }
 }

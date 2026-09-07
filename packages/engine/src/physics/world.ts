@@ -91,19 +91,24 @@ export class PhysicsWorld {
     return this.world.createCollider(this.R.ColliderDesc.trimesh(vertices, indices), body);
   }
 
-  /** Static ground from a height grid (goal.md PHY-1 fallback for cells without a collider). Returns the collider + a debug geometry. */
-  addGroundGrid(grid: GroundGrid): { collider: RAPIER_NS.Collider; geometry: THREE.BufferGeometry } {
-    const geometry = groundGridGeometry(grid);
+  /**
+   * Static ground from a height grid (goal.md PHY-1 fallback for cells without a collider), optionally only the part
+   * inside `rect` (the fence rectangle: beyond the scan's coverage the grid is hole-filled guesswork, and a phantom
+   * floor there would reach into a neighbouring cell, W-3). Returns the collider + a debug geometry.
+   */
+  addGroundGrid(grid: GroundGrid, rect?: XZRect): { collider: RAPIER_NS.Collider; geometry: THREE.BufferGeometry } {
+    const geometry = groundGridGeometry(grid, rect);
     const collider = this.addStaticTrimesh(geometry);
     return { collider, geometry };
   }
 
   /**
-   * Invisible walls around a ground grid (PHY-1 sample worlds / cells without a collider): four static cuboids rising
-   * `height` m above the highest ground vertex, so the car and the character stay on the block. Cell graphs replace
-   * this with streaming transitions (W-3).
+   * Invisible walls around a ground grid (PHY-1 sample worlds / cells without a collider): static cuboids rising
+   * `height` m above the highest ground vertex, so the car and the character stay on the block. Where a cell graph
+   * joins this cell to a neighbour (W-3), pass the transition's footprint as an `opening` and the wall leaves a gap
+   * there. Returns the colliders (one fixed body) so a streamed cell can take its fence with it.
    */
-  addFence(grid: GroundGrid, height = 4, margin = 1.5): RAPIER_NS.Collider[] {
+  addFence(grid: GroundGrid, height = 4, margin = 1.5, openings: XZRect[] = []): RAPIER_NS.Collider[] {
     let top = -Infinity;
     let bottom = Infinity;
     for (let i = 0; i < grid.heights.length; i++) {
@@ -112,30 +117,35 @@ export class PhysicsWorld {
       if (h < bottom) bottom = h;
     }
     if (!Number.isFinite(top)) top = bottom = 0;
-    const gridMaxX = grid.minX + (grid.cols - 1) * grid.cellSize;
-    const gridMaxZ = grid.minZ + (grid.rows - 1) * grid.cellSize;
-    const c = grid.coverage;
-    const minX = c ? Math.max(grid.minX, c.minX - margin) : grid.minX;
-    const minZ = c ? Math.max(grid.minZ, c.minZ - margin) : grid.minZ;
-    const maxX = c ? Math.min(gridMaxX, c.maxX + margin) : gridMaxX;
-    const maxZ = c ? Math.min(gridMaxZ, c.maxZ + margin) : gridMaxZ;
-    const cx = (minX + maxX) / 2;
-    const cz = (minZ + maxZ) / 2;
-    const hx = (maxX - minX) / 2;
-    const hz = (maxZ - minZ) / 2;
+    const rect = fenceRect(grid, margin);
     const hy = (top + height - bottom) / 2 + 1;
     const cy = (top + height + bottom) / 2 - 1;
     const t = 0.25; // wall half thickness
     const body = this.world.createRigidBody(this.R.RigidBodyDesc.fixed());
-    const walls: [number, number, number, number, number][] = [
-      [cx, minZ - t, hx + t, hy, t],
-      [cx, maxZ + t, hx + t, hy, t],
-      [minX - t, cz, t, hy, hz + t],
-      [maxX + t, cz, t, hy, hz + t],
-    ];
-    return walls.map(([x, z, ex, ey, ez]) =>
-      this.world.createCollider(this.R.ColliderDesc.cuboid(ex, ey, ez).setTranslation(x, cy, z).setFriction(0.2), body),
+    return fenceWalls(rect, openings, t).map((w) =>
+      this.world.createCollider(this.R.ColliderDesc.cuboid(w.ex, hy, w.ez).setTranslation(w.x, cy, w.z).setFriction(0.2), body),
     );
+  }
+
+  /** A static, optionally rotated box (transition floors, curbs, gates). */
+  addStaticBox(center: THREE.Vector3, halfExtents: THREE.Vector3, quaternion?: THREE.Quaternion, friction = 0.9): RAPIER_NS.Collider {
+    const body = this.world.createRigidBody(this.R.RigidBodyDesc.fixed());
+    const desc = this.R.ColliderDesc.cuboid(halfExtents.x, halfExtents.y, halfExtents.z)
+      .setTranslation(center.x, center.y, center.z)
+      .setFriction(friction);
+    if (quaternion) desc.setRotation({ x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w });
+    return this.world.createCollider(desc, body);
+  }
+
+  /** Remove colliders (and their fixed bodies once empty) — a streamed cell leaving the world. */
+  removeColliders(colliders: RAPIER_NS.Collider[]) {
+    const bodies = new Set<RAPIER_NS.RigidBody>();
+    for (const c of colliders) {
+      const body = c.parent();
+      if (body) bodies.add(body);
+      this.world.removeCollider(c, false);
+    }
+    for (const body of bodies) if (body.numColliders() === 0) this.world.removeRigidBody(body);
   }
 
   dispose() {
@@ -143,16 +153,26 @@ export class PhysicsWorld {
   }
 }
 
-/** Builds an indexed grid mesh (Y-up) from a height grid — shared by the collider and the debug wireframe. */
-export function groundGridGeometry(grid: GroundGrid): THREE.BufferGeometry {
-  const { heights, cols, rows, minX, minZ, cellSize } = grid;
+/**
+ * Builds an indexed grid mesh (Y-up) from a height grid — shared by the collider and the debug wireframe. With `rect`,
+ * only the vertices inside it (grown by one cell so the fence line is covered) are built.
+ */
+export function groundGridGeometry(grid: GroundGrid, rect?: XZRect): THREE.BufferGeometry {
+  const { heights, minX, minZ, cellSize } = grid;
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const x0 = rect ? clamp(Math.floor((rect.minX - minX) / cellSize) - 1, 0, grid.cols - 2) : 0;
+  const x1 = rect ? clamp(Math.ceil((rect.maxX - minX) / cellSize) + 1, x0 + 1, grid.cols - 1) : grid.cols - 1;
+  const z0 = rect ? clamp(Math.floor((rect.minZ - minZ) / cellSize) - 1, 0, grid.rows - 2) : 0;
+  const z1 = rect ? clamp(Math.ceil((rect.maxZ - minZ) / cellSize) + 1, z0 + 1, grid.rows - 1) : grid.rows - 1;
+  const cols = x1 - x0 + 1;
+  const rows = z1 - z0 + 1;
   const positions = new Float32Array(cols * rows * 3);
   for (let z = 0; z < rows; z++) {
     for (let x = 0; x < cols; x++) {
       const i = z * cols + x;
-      positions[i * 3] = minX + x * cellSize;
-      positions[i * 3 + 1] = heights[i] ?? 0;
-      positions[i * 3 + 2] = minZ + z * cellSize;
+      positions[i * 3] = minX + (x0 + x) * cellSize;
+      positions[i * 3 + 1] = heights[(z0 + z) * grid.cols + (x0 + x)] ?? 0;
+      positions[i * 3 + 2] = minZ + (z0 + z) * cellSize;
     }
   }
   const indices = new Uint32Array((cols - 1) * (rows - 1) * 6);
@@ -176,6 +196,79 @@ export function groundGridGeometry(grid: GroundGrid): THREE.BufferGeometry {
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeVertexNormals();
   return geometry;
+}
+
+export interface XZRect {
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+}
+
+export interface FenceWall {
+  x: number;
+  z: number;
+  ex: number;
+  ez: number;
+}
+
+/** The rectangle a fence hugs: the scan's coverage plus a margin, clamped to the grid. */
+export function fenceRect(grid: GroundGrid, margin = 1.5): XZRect {
+  const gridMaxX = grid.minX + (grid.cols - 1) * grid.cellSize;
+  const gridMaxZ = grid.minZ + (grid.rows - 1) * grid.cellSize;
+  const c = grid.coverage;
+  return {
+    minX: c ? Math.max(grid.minX, c.minX - margin) : grid.minX,
+    minZ: c ? Math.max(grid.minZ, c.minZ - margin) : grid.minZ,
+    maxX: c ? Math.min(gridMaxX, c.maxX + margin) : gridMaxX,
+    maxZ: c ? Math.min(gridMaxZ, c.maxZ + margin) : gridMaxZ,
+  };
+}
+
+/**
+ * Wall segments (centre + half extents in XZ) for the four sides of `rect`, thickness `t`, minus every `opening`
+ * that crosses a side: an opening that overlaps a wall's plane cuts its span out of that wall. Pure, so a cell
+ * graph's doorways can be checked without a physics world.
+ */
+export function fenceWalls(rect: XZRect, openings: XZRect[] = [], t = 0.25): FenceWall[] {
+  const walls: FenceWall[] = [];
+  const spans = (from: number, to: number, cuts: [number, number][]): [number, number][] => {
+    let pieces: [number, number][] = [[from, to]];
+    for (const [c0, c1] of cuts) {
+      const next: [number, number][] = [];
+      for (const [a, b] of pieces) {
+        if (c1 <= a || c0 >= b) next.push([a, b]);
+        else {
+          if (c0 > a) next.push([a, c0]);
+          if (c1 < b) next.push([c1, b]);
+        }
+      }
+      pieces = next;
+    }
+    return pieces.filter(([a, b]) => b - a > 0.05);
+  };
+  // Sides along X (at minZ / maxZ) and along Z (at minX / maxX); an opening cuts a side when it reaches its plane.
+  const sides: { axis: 'x' | 'z'; at: number; outward: -1 | 1 }[] = [
+    { axis: 'x', at: rect.minZ, outward: -1 },
+    { axis: 'x', at: rect.maxZ, outward: 1 },
+    { axis: 'z', at: rect.minX, outward: -1 },
+    { axis: 'z', at: rect.maxX, outward: 1 },
+  ];
+  for (const side of sides) {
+    const along = side.axis === 'x' ? [rect.minX - t, rect.maxX + t] : [rect.minZ - t, rect.maxZ + t];
+    const cuts: [number, number][] = [];
+    for (const o of openings) {
+      const reaches = side.axis === 'x' ? o.minZ <= side.at + t && o.maxZ >= side.at - t : o.minX <= side.at + t && o.maxX >= side.at - t;
+      if (reaches) cuts.push(side.axis === 'x' ? [o.minX, o.maxX] : [o.minZ, o.maxZ]);
+    }
+    for (const [a, b] of spans(along[0]!, along[1]!, cuts)) {
+      const mid = (a + b) / 2;
+      const half = (b - a) / 2;
+      const off = side.at + side.outward * t;
+      walls.push(side.axis === 'x' ? { x: mid, z: off, ex: half, ez: t } : { x: off, z: mid, ex: t, ez: half });
+    }
+  }
+  return walls;
 }
 
 /**

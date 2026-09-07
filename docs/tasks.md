@@ -29,7 +29,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 - [ ] Marble adapter (`tools/assets/adapters/marble.ts`) + `cell-*.json` jobs for 5 cells + hub; costs in `docs/cells.md`
 - [ ] Handedness/scale fix + `.rad` LoD build + R2 publish + `cell.json` schema
 - [ ] Rapier trimesh from collider; `align-collider` tool + CI gate (≤3%)
-- [ ] Cell graph + streaming transitions (≤2 resident); pano skybox choreography (UX-3)
+- [~] Cell graph + streaming transitions (≤2 resident); pano skybox choreography (UX-3) — **streaming skeleton on the sample worlds** (ADR-0009): `packages/engine/src/world/level.ts` (the graph from SCH-2 + `placements`, doorways from SCH-1 `transitions` on both cells of an edge, the pure `CellStreamer`: load within `streamAt_m`, evict the farthest, arrive in the return doorway), `transition.ts` (procedural roads: asphalt + curbs + fog sprites, a road cut through the cells' ground grids and an SDF dissolve through their splats, gates until the far cell's ground is in), fences open at doorways, ground colliders clipped to the scan's coverage; `apps/web/src/world/levels.ts` (`strip` = valley ↔ snow street ↔ sutro, `run` = three local butterflies for `tests/e2e/streaming.spec.ts`) — Marble cells, the kitbash segments and the pano choreography pending
 - [ ] Time-of-day presets + fog modifier (W-5)
 
 ## M3 — Actor mode ×3 platforms (ACT/INP/PHY/CAM-4)

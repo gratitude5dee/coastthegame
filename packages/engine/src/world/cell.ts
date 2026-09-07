@@ -46,4 +46,6 @@ export interface Level {
   hub: string;
   cells: string[];
   edges: [string, string][];
+  /** Where each cell's frame sits in the shared world (W-3, ADR-0009); a cell without one sits at the origin. */
+  placements?: Record<string, { origin: [number, number, number] }>;
 }

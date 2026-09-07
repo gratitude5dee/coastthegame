@@ -25,10 +25,20 @@ export default defineConfig({
       ],
     },
   },
-  webServer: {
-    command: 'pnpm --filter @coast/web preview',
-    url: 'http://localhost:4173',
-    reuseExistingServer: true,
-    timeout: 60_000,
-  },
+  // The built app on :4173 and the Worker on :8787 (workerd, local R2/DO): the slice uploads takes and cuts at cut,
+  // and a proxy error from a missing API shows up as a page error the tests refuse.
+  webServer: [
+    {
+      command: 'pnpm --filter @coast/web preview',
+      url: 'http://localhost:4173',
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+    {
+      command: 'pnpm --filter @coast/api dev',
+      url: 'http://localhost:8787/api/health',
+      reuseExistingServer: true,
+      timeout: 120_000,
+    },
+  ],
 });

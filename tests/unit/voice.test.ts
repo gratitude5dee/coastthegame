@@ -61,7 +61,13 @@ describe('VoiceInput', () => {
       ['follow', false],
     ]);
     expect(onInterim).toHaveBeenLastCalledWith('camera low follow');
-    rec.result([['camera low ', true], ['follow the car', true]], 1); // the list is cumulative; index 1 is what changed
+    rec.result(
+      [
+        ['camera low ', true],
+        ['follow the car', true],
+      ],
+      1,
+    ); // the list is cumulative; index 1 is what changed
     t = 2900;
     rec.onspeechend?.();
     v.stop();
