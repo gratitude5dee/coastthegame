@@ -1614,7 +1614,9 @@ export class Game {
     if (!studio) return;
     this.syncStudioHook();
     const photographer = this.npcs?.byId('photographer');
-    const npcDist = photographer ? feet.distanceTo(photographer.mesh.position) : Infinity;
+    // Possessing the Photographer (ACT-3) puts her identity on the player: you are never "away" from yourself, so the
+    // brief and the verdict stay put (walking off to bank the stars needs her body back, or the reel).
+    const npcDist = photographer ? feet.distanceTo(photographer.mesh.position) : this.identity.id === 'photographer' ? 0 : Infinity;
     if (studio.state === 'idle' && npcDist < 2.6) {
       studio.brief();
       this.updateHint();

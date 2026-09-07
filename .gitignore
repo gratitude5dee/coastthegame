@@ -37,3 +37,8 @@ apps/web/public/cells/**/*.part
 
 # M0 sample splat (4 MB, under the 5 MB rule) so the seed and CI never depend on an external host
 !apps/web/public/samples/*.spz
+
+# session QA scratch on a linked machine (never committed)
+/_qa/
+*.bundle
+/_to_delete*
