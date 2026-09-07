@@ -15,6 +15,7 @@ import {
   ShotMeter,
   TakeRecorder,
   TakeSet,
+  captionTrack,
   planCut,
   setTime,
   takeStore,
@@ -30,7 +31,7 @@ import {
 } from '@coast/studio';
 import { createMissionCard, type MissionCard } from '../ui/missionCard';
 import { GhostActor, type ActorLook } from './ghosts';
-import { exportCut, type ExportResult, type ExportScene } from './exporter';
+import { exportCut, type ExportResult, type ExportScene, type Overlay } from './exporter';
 import { uploadCut, uploadTake } from '../api';
 
 /** Gives a ghost body to a take's performer (the game knows the looks; tests get capsules). */
@@ -339,7 +340,9 @@ export class StudioSession {
       downloadName: `coast-${this.mission.id}-take${this.takesUsed}.${ext}`,
       onRetake: this.takesUsed < this.mission.takesMax ? () => this.retake() : undefined,
       onPlayback: () => this.startPlayback(performance.now()),
-      ...(this.exportScene && this.set.size > 0 ? { onExport: () => void this.exportCutToCard() } : {}),
+      ...(this.exportScene && this.set.size > 0
+        ? { onExport: () => void this.exportCutToCard(), onExportPortrait: () => void this.exportCutToCard({ width: 1080, height: 1920 }) }
+        : {}),
     });
     this.onClip?.(this.lastClipUrl, verdict);
     this.startPlayback(performance.now(), true);
@@ -467,11 +470,28 @@ export class StudioSession {
    * Export the set as a Coast Cut (STU-1/STU-3): fixed-step, every take solid, the newest take's camera. Returns the
    * encoded clip; the card shows progress and the download.
    */
-  async exportCut(opts: Omit<CutOptions, 'durationS'> = {}, onProgress?: (done: number, total: number) => void): Promise<ExportResult> {
+  async exportCut(
+    opts: Omit<CutOptions, 'durationS'> & { captions?: boolean; credit?: string } = {},
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<ExportResult> {
     if (!this.exportScene) throw new Error('export is not available here');
     if (this.set.size === 0) throw new Error('nothing to export — cut a take first');
     if (this.exporting) throw new Error('already exporting');
-    const plan = planCut({ durationS: this.set.durationS, cameraLayer: this.set.size - 1, ...opts });
+    const { captions = true, credit, ...cut } = opts;
+    const plan = planCut({ durationS: this.set.durationS, cameraLayer: this.set.size - 1, ...cut });
+    const m = this.mission;
+    const overlay: Overlay = {
+      look: m.look,
+      captions: captions
+        ? captionTrack({
+            title: m.title,
+            subtitle: `${m.section ? `${m.section} · ` : ''}bars ${m.barRange[0]}–${m.barRange[1]}`,
+            durationS: plan.endS - plan.startS,
+            takes: this.set.layers.map((l) => l.take),
+            ...(credit ? { credit } : {}),
+          })
+        : [],
+    };
     const camLayer = this.set.layers[Math.min(Math.max(0, plan.cameraLayer), this.set.size - 1)]!;
     const host = this.exportScene();
     const wasPlaying = this.playing;
@@ -506,18 +526,20 @@ export class StudioSession {
           },
         },
         onProgress,
+        overlay,
       );
     } finally {
       this.exporting = false;
     }
   }
 
-  private async exportCutToCard() {
+  private async exportCutToCard(opts: { width?: number; height?: number } = {}) {
     try {
-      const r = await this.exportCut({}, (done, total) => this.card.exportProgress(done, total));
+      const r = await this.exportCut(opts, (done, total) => this.card.exportProgress(done, total));
       if (this.lastCutUrl) URL.revokeObjectURL(this.lastCutUrl);
       this.lastCutUrl = URL.createObjectURL(r.blob);
-      this.card.exportReady(this.lastCutUrl, `coast-cut-${this.mission.id}.${r.ext}`);
+      const portrait = (opts.height ?? 0) > (opts.width ?? 1);
+      this.card.exportReady(this.lastCutUrl, `coast-cut-${this.mission.id}${portrait ? '-9x16' : ''}.${r.ext}`);
       performance.mark('coast:cut-exported');
       this.reel.setCut(this.mission.id, this.lastCutUrl);
       if (this.sessionId) {

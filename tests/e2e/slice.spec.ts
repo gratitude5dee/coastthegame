@@ -11,7 +11,7 @@ const frame = () => (window as unknown as { __coastFrame?: number }).__coastFram
 // Vertical-slice loop (goal.md §3.1 steps 4–6 / M3.5): mission briefed → Enter rolls (MediaRecorder + TakeRecorder) →
 // Enter cuts → verdict with ★, hints and a downloadable clip; the take replays as a ghost.
 test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
-  test.slow(); // two clips on software GL: the second one crawls (see below)
+  test.setTimeout(600_000); // two clips + two exports on software GL: the second clip crawls (see below)
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -62,6 +62,10 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   // here (the first bar at 10 fps, 320×180) so software GL finishes in seconds.
   const cut = await page.evaluate(() => window.__coastExport!({ width: 320, height: 180, fps: 10, bars: [1, 1] }));
   expect(cut.frames).toBe(26); // one bar at 92 bpm = 2.6 s
+  // A portrait cut (9:16) composes the same frames tall — the camera's vertical field stays, the sides crop.
+  const tall = await page.evaluate(() => window.__coastExport!({ width: 90, height: 160, fps: 5, bars: [1, 1] }));
+  expect(tall.frames).toBe(13);
+  expect(tall.bytes).toBeGreaterThan(500);
   expect(cut.bytes).toBeGreaterThan(2000);
   expect(cut.mime).toMatch(/^video\/(mp4|webm)/);
   await expect(page.locator('.mc-state')).toBeVisible(); // the live loop resumed (the card keeps updating)

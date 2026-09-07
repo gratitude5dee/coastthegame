@@ -18,7 +18,14 @@ export interface MissionCard {
   /** Show the judge's verdict (MIS-3). Buttons/links appear only for the options that are provided. */
   verdict(
     v: Verdict,
-    opts?: { downloadUrl?: string; downloadName?: string; onRetake?: () => void; onPlayback?: () => void; onExport?: () => void },
+    opts?: {
+      downloadUrl?: string;
+      downloadName?: string;
+      onRetake?: () => void;
+      onPlayback?: () => void;
+      onExport?: () => void;
+      onExportPortrait?: () => void;
+    },
   ): void;
   /** Cut export (STU-3) feedback on the verdict view: progress, the finished file, or what went wrong. */
   exportProgress(done: number, total: number): void;
@@ -299,9 +306,23 @@ export function createMissionCard(parent: HTMLElement): MissionCard {
         const cut = h('button', 'mc-btn', 'Cut → MP4');
         cut.type = 'button';
         cut.dataset.act = 'export';
-        cut.addEventListener('click', () => opts.onExport?.());
+        cut.addEventListener('click', () => {
+          exportBtn = cut;
+          opts.onExport?.();
+        });
         actions.append(cut);
         exportBtn = cut;
+      }
+      if (opts.onExportPortrait) {
+        const tall = h('button', 'mc-btn', '9:16');
+        tall.type = 'button';
+        tall.dataset.act = 'export-portrait';
+        tall.title = 'a portrait cut for phones (1080×1920)';
+        tall.addEventListener('click', () => {
+          exportBtn = tall;
+          opts.onExportPortrait?.();
+        });
+        actions.append(tall);
       }
 
       verdictEl.replaceChildren(stars);
