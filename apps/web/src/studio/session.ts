@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import {
   MISSIONS_V0,
+  Reel,
   ShotMeter,
   TakeRecorder,
   TakeSet,
@@ -114,6 +115,12 @@ export class StudioSession {
   /** Guest session id (the Worker keys takes and cuts by it); empty = never upload. */
   sessionId = '';
   lastShare: string | null = null;
+  /** The reel (MIS-4): best take + stars per mission, persisted across visits. */
+  readonly reel: Reel;
+  /** Watching an earned mission's take again (from the reel) — its own set and ghost, the mission's set untouched. */
+  private review: { set: TakeSet; ghosts: GhostActor[]; missionId: string } | null = null;
+  /** The game persists the reel (localStorage) and redraws the strip. */
+  onReel: ((reel: Reel) => void) | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -131,6 +138,7 @@ export class StudioSession {
     this.mission = this.missions[this.missionIndex]!;
     this.meter = new ShotMeter(this.mission);
     this.recorder = new TakeRecorder({ actorId: 'player', cellVersion });
+    this.reel = new Reel(this.missions);
     const fallbackLook: ActorLook = { color: 0x9be34a, name: 'replay' };
     this.makeGhost = ghostFactory ?? (() => new GhostActor(scene, playerTemplate, null, fallbackLook));
   }
@@ -316,6 +324,8 @@ export class StudioSession {
     const verdict = this.meter.finish(elapsed, take.id);
     this.lastVerdict = verdict;
     if (verdict.stars > (this.stars.get(this.mission.id) ?? 0)) this.stars.set(this.mission.id, verdict.stars);
+    this.reel.record(this.mission.id, verdict.stars, take.id);
+    this.onReel?.(this.reel);
     performance.mark('coast:take-cut');
     void takeStore.save(take).catch(() => {});
     if (this.sessionId) void uploadTake(this.sessionId, take); // ACT-4: the R2 shelf, when the API is around
@@ -374,6 +384,7 @@ export class StudioSession {
 
   /** Replay the set from `nowMs`: looping on its own (P, after a cut) or once, on the take clock, under a rolling take. */
   startPlayback(nowMs: number, loop = true) {
+    this.stopReview();
     if (this.set.size === 0) return;
     this.playbackStartMs = nowMs;
     this.playbackLoop = loop;
@@ -384,6 +395,10 @@ export class StudioSession {
   }
 
   stopPlayback() {
+    if (this.review) {
+      this.stopReview();
+      return;
+    }
     this.playing = false;
     for (const g of this.ghosts) g.visible = false;
   }
@@ -394,22 +409,58 @@ export class StudioSession {
   }
 
   private updatePlayback(nowMs: number) {
-    const t = setTime(nowMs, this.playbackStartMs, this.set.durationS, this.playbackLoop);
-    this.seekSet(t);
+    const stage = this.review ?? { set: this.set, ghosts: this.ghosts };
+    const t = setTime(nowMs, this.playbackStartMs, stage.set.durationS, this.playbackLoop);
+    this.seekSet(t, stage.set, stage.ghosts);
   }
 
   /** Put every ghost and every replayed prop where the set has them at time `t`. */
-  private seekSet(t: number) {
-    for (let i = 0; i < this.ghosts.length; i++) {
-      const pose = this.set.poseAt(i, t, this.ghostPose);
-      if (pose) this.ghosts[i]!.setPose(pose);
+  private seekSet(t: number, set = this.set, ghosts = this.ghosts) {
+    for (let i = 0; i < ghosts.length; i++) {
+      const pose = set.poseAt(i, t, this.ghostPose);
+      if (pose) ghosts[i]!.setPose(pose);
     }
     if (this.propWriter) {
-      for (const id of this.set.propIds()) {
-        const p = this.set.propPoseAt(id, t, this.propPose);
+      for (const id of set.propIds()) {
+        const p = set.propPoseAt(id, t, this.propPose);
         if (p) this.propWriter(id, p);
       }
     }
+  }
+
+  /**
+   * Watch an earned mission's best take again (the reel, MIS-4): loaded from the session store, replayed on its own
+   * ghost while the current mission's set stays as it is. Resolves false when there is nothing to watch.
+   */
+  async reviewMission(missionId: string, nowMs = performance.now()): Promise<boolean> {
+    const entry = this.reel.entry(missionId);
+    if (!entry?.takeId || this.state === 'recording') return false;
+    const take = this.set.layers.find((l) => l.take.id === entry.takeId)?.take ?? (await takeStore.load(entry.takeId).catch(() => null));
+    if (!take || take.samples.length < 2) return false;
+    this.stopPlayback();
+    this.stopReview();
+    const set = new TakeSet(1);
+    set.add(take);
+    const ghost = this.makeGhost(take.actorId);
+    this.review = { set, ghosts: [ghost], missionId };
+    this.playbackStartMs = nowMs;
+    this.playbackLoop = true;
+    this.playing = true;
+    ghost.visible = true;
+    this.updatePlayback(nowMs);
+    return true;
+  }
+
+  get reviewing(): string | null {
+    return this.review?.missionId ?? null;
+  }
+
+  stopReview() {
+    const r = this.review;
+    if (!r) return;
+    this.review = null;
+    this.playing = false;
+    for (const g of r.ghosts) g.dispose();
   }
 
   /**
@@ -468,13 +519,16 @@ export class StudioSession {
       this.lastCutUrl = URL.createObjectURL(r.blob);
       this.card.exportReady(this.lastCutUrl, `coast-cut-${this.mission.id}.${r.ext}`);
       performance.mark('coast:cut-exported');
+      this.reel.setCut(this.mission.id, this.lastCutUrl);
       if (this.sessionId) {
         const shared = await uploadCut(this.sessionId, `${this.mission.id}-${Date.now().toString(36)}`, r.blob, this.mission.title);
         if (shared) {
           this.lastShare = shared.url;
           this.card.exportShared(shared.url);
+          this.reel.setCut(this.mission.id, shared.url);
         }
       }
+      this.onReel?.(this.reel);
     } catch (e) {
       console.warn('cut export failed', e);
       this.card.exportFailed(e instanceof Error ? e.message : String(e));
@@ -497,6 +551,7 @@ export class StudioSession {
   }
 
   dispose() {
+    this.stopReview();
     this.clearSet();
     this.card.hide();
   }

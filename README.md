@@ -50,6 +50,7 @@ Open `http://localhost:5173/?cam=director` (desktop) or the LAN URL Vite prints 
 | Action / cut a take · replay the set           | Enter · P (every take of the mission performs together) · **Cut → MP4** on the verdict card exports it | ACTION                  | Start           |
 | Possess an NPC (play their part next take)     | V near them · V near the body that carries $COAST switches back                                        | BE                      | Back            |
 | Direct by saying it                            | hold **`** and speak (Chrome / Safari speech) · or `/` and type: _camera low, follow the car, action_  | MIC (hold) · SAY        | LT (hold)       |
+| The reel (top right)                           | fills bar by bar as missions are earned · click a mission to watch its best take · P stops             | same                    | —               |
 | Answer the director's question                 | _yes_ · _no_ · _the left one_ · _the closer one_ (a pending move shows as a ghost)                     | same                    | —               |
 | Lowrider: get in / out                         | E next to it                                                                                           | GRAB→EXIT               | X               |
 | Drive · handbrake · hop                        | WASD · Shift · Space (Shift+Space = all four)                                                          | stick · HOP             | sticks · LB · A |

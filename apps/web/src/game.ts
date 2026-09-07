@@ -49,13 +49,15 @@ import { initPerf } from './perf';
 import { StudioSession, type FrameContext } from './studio/session';
 import { Metronome } from './audio/metronome';
 import { Sfx } from './audio/sfx';
+import { Tts } from './audio/tts';
 import { NpcSystem, type Npc, type NpcSpec } from './npc/npcs';
 import { GhostActor } from './studio/ghosts';
 import { RealtimeClient, type CameraRequest, type SceneOps, type UtteranceOutcome } from '@coast/director';
-import { DirectorConsole, summarize } from './director/console';
+import { DirectorConsole, spokenReply, summarize } from './director/console';
 import { VoiceInput } from './director/voice';
 import { connectRealtime, type RealtimeSession } from './director/realtimeWebrtc';
 import { createSubtitles, type Subtitles } from './ui/subtitles';
+import { createReelStrip, type ReelStrip } from './ui/reel';
 import { createLoadingScreen, type LoadingScreen } from './ui/loading';
 
 export interface SceneDef {
@@ -246,6 +248,8 @@ export class Game {
   private readonly beat = new BeatClock();
   private readonly metronome = new Metronome(this.beat);
   private sfx!: Sfx;
+  /** Browser speech synthesis for NPC lines and the director's replies (AUD-1 placeholder). */
+  private tts!: Tts;
   private readonly stride = new StrideTracker();
   private autoHop = false;
   private pendingBeat: { event: NonNullable<MeterSample['beatEvent']>; phaseMs: number } | null = null;
@@ -273,6 +277,7 @@ export class Game {
   private studio: StudioSession | null = null;
   private npcs: NpcSystem | null = null;
   private subtitles: Subtitles | null = null;
+  private reelStrip: ReelStrip | null = null;
   /** Who the player is right now (ACT-3): $COAST, or an NPC identity taken over with V. */
   private identity: NpcSpec = PLAYER_IDENTITY;
   private possessions = 0;
@@ -308,6 +313,7 @@ export class Game {
 
     this.camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.05, 2000);
     this.sfx = new Sfx(this.camera, { muted: params.get('mute') === '1' || this.isShot });
+    this.tts = new Tts({ muted: params.get('mute') === '1' || this.isShot || params.get('tts') === '0' });
     // Audio starts on the first gesture (autoplay policy) — any key, click or touch.
     const unlock = () => this.sfx.unlock();
     for (const ev of ['keydown', 'pointerdown', 'touchstart'] as const) window.addEventListener(ev, unlock, { passive: true });
@@ -376,6 +382,7 @@ export class Game {
         onOutcome: (text, outcome) => {
           this.subtitles ??= createSubtitles(document.body);
           this.subtitles.say('Director', summarize(outcome), 4500);
+          this.tts.say('director', spokenReply(outcome));
           this.syncDirectorHook(text, outcome);
           this.updateHint();
         },
@@ -510,6 +517,7 @@ export class Game {
       this.studio.dispose();
       this.studio = null;
     }
+    this.reelStrip?.hide();
     if (this.identity !== PLAYER_IDENTITY) this.setIdentity(PLAYER_IDENTITY);
     this.looks.clear();
     this.followId = null;
@@ -946,6 +954,7 @@ export class Game {
     const npcs = new NpcSystem(physics, this.world, this.ground, {
       onGreet: (npc, line) => {
         this.subtitles?.say(npc.spec.name, line);
+        this.tts.say(npc.spec.id, line);
         this.sfx.tick(npc.spec.id === 'photographer' ? 900 : 600);
         if (npc.spec.id === 'photographer' && this.studio?.state === 'idle') {
           this.studio.brief();
@@ -1045,6 +1054,29 @@ export class Game {
     studio.onClip = (url) => this.showClip(url);
     studio.actorId = this.identity.id;
     studio.sessionId = this.opts.sessionId;
+    // The reel (MIS-4): persisted per browser; the strip redraws on every verdict / export.
+    try {
+      studio.reel.restore(JSON.parse(localStorage.getItem('coast:reel') ?? 'null'));
+    } catch {
+      /* no saved reel */
+    }
+    this.reelStrip ??= createReelStrip(document.body, (missionId) => {
+      void this.studio?.reviewMission(missionId).then((ok) => {
+        if (ok) {
+          this.subtitles ??= createSubtitles(document.body);
+          this.subtitles.say('Reel', `${this.studio?.reel.entry(missionId)?.title ?? missionId} — best take · P stops`, 3000);
+        }
+      });
+    });
+    studio.onReel = (reel) => {
+      try {
+        localStorage.setItem('coast:reel', JSON.stringify(reel.serialize()));
+      } catch {
+        /* storage full or blocked */
+      }
+      this.reelStrip?.render(reel, studio.mission.id);
+    };
+    this.reelStrip.render(studio.reel, studio.mission.id);
     studio.propWriter = (id, pose) => {
       if (this.props?.grabbed?.spec.id === id) return; // the player is holding it: the live hand wins
       this.props?.setPose(id, pose.pos, pose.quat);
@@ -1206,7 +1238,7 @@ export class Game {
     }
     this.pttWasHeld = i.ptt;
     if (i.muteToggle) {
-      this.sfx.toggleMuted();
+      this.tts.setMuted(this.sfx.toggleMuted());
       this.updateHint();
     }
     if (i.beatToggle) {
@@ -1592,6 +1624,7 @@ export class Game {
       else if (npcDist > LEAVE_DISTANCE && performance.now() - this.verdictAt > VERDICT_GRACE_MS) {
         studio.leave();
         this.verdictAt = 0;
+        this.reelStrip?.render(studio.reel, studio.mission.id);
         this.updateHint();
       }
     } else this.verdictAt = 0;

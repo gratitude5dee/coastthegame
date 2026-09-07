@@ -205,4 +205,30 @@ describe('StudioSession mission loop', () => {
     s.tick(ctx(4800, bad)); // 1.8 s: held at the end of its flight
     expect(writes.at(-1)![1]).toBeCloseTo(6, 1);
   });
+
+  it('the reel keeps the best take per mission and can play it back again after the mission is over', async () => {
+    const s = makeSession();
+    const reels: number[] = [];
+    s.onReel = (r) => reels.push(r.progress().earnedBars);
+    s.brief();
+    expect(s.reel.progress().earnedBars).toBe(0);
+    const v = await shoot(s, 1000, 6);
+    expect(v.stars).toBe(3);
+    expect(s.reel.entry('m01-low-and-slow')).toMatchObject({ stars: 3, takeId: s.lastTake!.id });
+    expect(reels).toEqual([8]);
+    expect(s.leave().id).toBe(MISSIONS_V0[1]!.id); // mission 1 banked, its set cleared
+    expect(s.set.size).toBe(0);
+    // Watching it again from the reel: its own ghost, looping, independent of the (empty) current set.
+    expect(await s.reviewMission('m01-low-and-slow', 50_000)).toBe(true);
+    expect(s.reviewing).toBe('m01-low-and-slow');
+    expect(s.playing).toBe(true);
+    s.tick(ctx(51_000));
+    expect(s.set.size).toBe(0);
+    s.togglePlayback(52_000); // P stops the review
+    expect(s.reviewing).toBeNull();
+    expect(s.playing).toBe(false);
+    expect(await s.reviewMission('m02-hop-on-the-one')).toBe(false); // nothing earned there yet
+    const saved = s.reel.serialize();
+    expect(saved.entries[0]).toMatchObject({ missionId: 'm01-low-and-slow', stars: 3 });
+  });
 });

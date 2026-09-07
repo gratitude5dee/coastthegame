@@ -65,6 +65,10 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   expect(cut.bytes).toBeGreaterThan(2000);
   expect(cut.mime).toMatch(/^video\/(mp4|webm)/);
   await expect(page.locator('.mc-state')).toBeVisible(); // the live loop resumed (the card keeps updating)
+  // The reel (MIS-4): the mission's slot is filled and its button plays the best take back.
+  await expect(page.locator('#coast-reel')).toBeVisible();
+  await expect(page.locator('#coast-reel .rl-bar.earned')).toHaveCount(0); // ☆☆☆ takes fill nothing
+  await expect(page.locator('#coast-reel button[data-mission="m01-low-and-slow"]')).toBeEnabled();
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 

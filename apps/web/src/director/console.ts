@@ -36,6 +36,17 @@ export function summarize(outcome: UtteranceOutcome): string {
   return parts.join(' · ');
 }
 
+/** What the director says back: the first thing that went wrong, else a two-word confirmation. */
+export function spokenReply(outcome: UtteranceOutcome): string {
+  const results = outcome.results;
+  if (!results.length) return '';
+  const q = results.find((r) => !r.ok && r.question);
+  if (q) return q.question!;
+  const bad = results.find((r) => !r.ok);
+  if (bad) return bad.error?.replace(/^didn't get "(.+)"$/, "didn't get $1") ?? 'no';
+  return results.length > 1 ? 'done, all of it' : 'done';
+}
+
 export class DirectorConsole {
   readonly executor: ActExecutor;
   readonly el: HTMLDivElement;
