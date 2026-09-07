@@ -163,7 +163,7 @@ declare global {
       width?: number;
       height?: number;
       bars?: [number, number];
-    }) => Promise<{ bytes: number; mime: string; codec: string; ext: string; frames: number; seconds: number }>;
+    }) => Promise<{ bytes: number; mime: string; codec: string; ext: string; frames: number; seconds: number; manifest: unknown }>;
     /** QA: put the player's feet somewhere (the streaming harness walks the level this way). */
     __coastTeleport?: (x: number, y: number, z: number) => boolean;
     __coastCells?: {
@@ -1389,7 +1389,7 @@ export class Game {
     });
     window.__coastExport = async (opts) => {
       const r = await studio.exportCut(opts ?? {});
-      return { bytes: r.blob.size, mime: r.mime, codec: r.codec, ext: r.ext, frames: r.frames, seconds: r.seconds };
+      return { bytes: r.blob.size, mime: r.mime, codec: r.codec, ext: r.ext, frames: r.frames, seconds: r.seconds, manifest: r.manifest };
     };
     this.studio = studio;
     if (missionParam > 0) studio.brief(); // QA: `?mission=n` auto-briefs mission n

@@ -7,6 +7,8 @@ export * from './set';
 export * from './export';
 export * from './reel';
 export * from './captions';
+export * from './provenance';
+import type { Provenance } from './provenance';
 
 export type PassName = 'beauty' | 'depth' | 'normal' | 'id' | 'pose';
 
@@ -64,20 +66,4 @@ export interface Cut {
   captions: boolean;
   lut?: string;
   provenance: Provenance; // STU-5 → NFT metadata
-}
-
-export interface Provenance {
-  cells: { id: string; version: string }[];
-  takes: string[];
-  shots: string[];
-  missions: string[];
-  trackId: string;
-  barRange: [number, number];
-  prompts: string[];
-  models: string[]; // e.g. "minimax/h3-max-turbo", "gpt-realtime-2.1-mini"
-  seeds: number[];
-  userRefs: string[]; // R2 keys of user-supplied reference media (GEN-4), labelled in the mint metadata
-  costUsd: number;
-  createdAt: string;
-  author: { userId: string; wallet?: string };
 }

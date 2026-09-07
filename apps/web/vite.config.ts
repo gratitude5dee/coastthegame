@@ -1,5 +1,24 @@
 import { defineConfig } from 'vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+
+/** App version + commit for the provenance manifest (STU-5): package.json and `git rev-parse` at build time. */
+function appVersion(): { version: string; commit: string } {
+  const version = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }).version;
+  let commit = process.env.COAST_COMMIT ?? '';
+  if (!commit) {
+    try {
+      commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim();
+    } catch {
+      commit = 'unknown';
+    }
+  }
+  return { version, commit };
+}
+const APP = appVersion();
 
 /**
  * Code-splitting (goal.md QB-3 / W-1): three and Spark each get their own long-lived, hash-named chunk so the app
@@ -16,6 +35,7 @@ function manualChunks(id: string): string | undefined {
 }
 
 export default defineConfig({
+  define: { __COAST_VERSION__: JSON.stringify(APP.version), __COAST_COMMIT__: JSON.stringify(APP.commit) },
   // `pnpm dev:https` — WebXR (Quest, Vision Pro) and the microphone need a secure context off localhost: a self-signed
   // cert on the LAN URL (accept the browser's warning once on the headset / phone).
   plugins: process.env.COAST_HTTPS === '1' ? [basicSsl()] : [],

@@ -15,10 +15,13 @@ import {
   ShotMeter,
   TakeRecorder,
   TakeSet,
+  DEFAULT_BEAT_GRID,
+  buildCutManifest,
   captionTrack,
   planCut,
   setTime,
   takeStore,
+  type CutManifest,
   type CutOptions,
   type ConstraintResult,
   type MeterSample,
@@ -32,7 +35,7 @@ import {
 import { createMissionCard, type MissionCard } from '../ui/missionCard';
 import { GhostActor, type ActorLook } from './ghosts';
 import { exportCut, type ExportResult, type ExportScene, type Overlay } from './exporter';
-import { uploadCut, uploadTake } from '../api';
+import { sha256Hex, uploadCut, uploadCutManifest, uploadTake } from '../api';
 
 /** Gives a ghost body to a take's performer (the game knows the looks; tests get capsules). */
 export type GhostFactory = (actorId: string) => GhostActor;
@@ -116,6 +119,8 @@ export class StudioSession {
   /** Guest session id (the Worker keys takes and cuts by it); empty = never upload. */
   sessionId = '';
   lastShare: string | null = null;
+  /** The provenance manifest of the last exported cut (STU-5). */
+  lastManifest: CutManifest | null = null;
   /** The reel (MIS-4): best take + stars per mission, persisted across visits. */
   readonly reel: Reel;
   /** Watching an earned mission's take again (from the reel) — its own set and ghost, the mission's set untouched. */
@@ -471,13 +476,13 @@ export class StudioSession {
    * encoded clip; the card shows progress and the download.
    */
   async exportCut(
-    opts: Omit<CutOptions, 'durationS'> & { captions?: boolean; credit?: string } = {},
+    opts: Omit<CutOptions, 'durationS'> & { captions?: boolean; credit?: string; id?: string } = {},
     onProgress?: (done: number, total: number) => void,
-  ): Promise<ExportResult> {
+  ): Promise<ExportResult & { manifest: CutManifest }> {
     if (!this.exportScene) throw new Error('export is not available here');
     if (this.set.size === 0) throw new Error('nothing to export — cut a take first');
     if (this.exporting) throw new Error('already exporting');
-    const { captions = true, credit, ...cut } = opts;
+    const { captions = true, credit, id: cutId, ...cut } = opts;
     const plan = planCut({ durationS: this.set.durationS, cameraLayer: this.set.size - 1, ...cut });
     const m = this.mission;
     const overlay: Overlay = {
@@ -492,6 +497,25 @@ export class StudioSession {
           })
         : [],
     };
+    const takes = this.set.layers.map((l) => l.take);
+    // The provenance manifest (STU-5): everything the picture came from, hashed to the file once it exists.
+    const manifestFor = (r: ExportResult, sha256?: string): CutManifest =>
+      buildCutManifest({
+        id: cutId ?? `${m.id}-${Date.now().toString(36)}`,
+        title: m.title,
+        missionId: m.id,
+        trackId: m.trackId,
+        barRange: m.barRange,
+        bpm: DEFAULT_BEAT_GRID.bpm,
+        look: m.look,
+        takes,
+        plan,
+        captions: overlay.captions ?? [],
+        video: { bytes: r.blob.size, mime: r.mime, codec: r.codec, ...(sha256 ? { sha256 } : {}) },
+        cells: [{ id: this.cellVersion, version: this.cellVersion }],
+        author: { userId: this.sessionId ?? 'guest' },
+        app: { version: __COAST_VERSION__, commit: __COAST_COMMIT__ },
+      });
     const camLayer = this.set.layers[Math.min(Math.max(0, plan.cameraLayer), this.set.size - 1)]!;
     const host = this.exportScene();
     const wasPlaying = this.playing;
@@ -499,7 +523,7 @@ export class StudioSession {
     this.exporting = true;
     this.stopPlayback();
     try {
-      return await exportCut(
+      const result = await exportCut(
         plan,
         {
           renderer: host.renderer,
@@ -528,6 +552,7 @@ export class StudioSession {
         onProgress,
         overlay,
       );
+      return { ...result, manifest: manifestFor(result, await sha256Hex(result.blob)) };
     } finally {
       this.exporting = false;
     }
@@ -535,19 +560,22 @@ export class StudioSession {
 
   private async exportCutToCard(opts: { width?: number; height?: number } = {}) {
     try {
-      const r = await this.exportCut(opts, (done, total) => this.card.exportProgress(done, total));
+      const cutId = `${this.mission.id}-${Date.now().toString(36)}`;
+      const r = await this.exportCut({ ...opts, id: cutId }, (done, total) => this.card.exportProgress(done, total));
       if (this.lastCutUrl) URL.revokeObjectURL(this.lastCutUrl);
       this.lastCutUrl = URL.createObjectURL(r.blob);
       const portrait = (opts.height ?? 0) > (opts.width ?? 1);
       this.card.exportReady(this.lastCutUrl, `coast-cut-${this.mission.id}${portrait ? '-9x16' : ''}.${r.ext}`);
       performance.mark('coast:cut-exported');
       this.reel.setCut(this.mission.id, this.lastCutUrl);
+      this.lastManifest = r.manifest;
       if (this.sessionId) {
-        const shared = await uploadCut(this.sessionId, `${this.mission.id}-${Date.now().toString(36)}`, r.blob, this.mission.title);
+        const shared = await uploadCut(this.sessionId, cutId, r.blob, this.mission.title, r.manifest.video?.sha256);
         if (shared) {
           this.lastShare = shared.url;
           this.card.exportShared(shared.url);
           this.reel.setCut(this.mission.id, shared.url);
+          void uploadCutManifest(this.sessionId, cutId, r.manifest); // the share page's credits (STU-5)
         }
       }
       this.onReel?.(this.reel);

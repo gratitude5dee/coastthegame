@@ -62,6 +62,23 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   // here (the first bar at 10 fps, 320×180) so software GL finishes in seconds.
   const cut = await page.evaluate(() => window.__coastExport!({ width: 320, height: 180, fps: 10, bars: [1, 1] }));
   expect(cut.frames).toBe(26); // one bar at 92 bpm = 2.6 s
+  // The provenance manifest (STU-5) travels with the cut: both takes, the cell, the shot, the file's hash.
+  const manifest = cut.manifest as {
+    v: number;
+    kind: string;
+    takeDetails: { actorId: string }[];
+    cells: { id: string }[];
+    shot: { frames: number; fps: number; bars?: [number, number]; look?: string };
+    video?: { bytes: number; sha256?: string };
+    app: { version: string; commit?: string };
+  };
+  expect(manifest).toMatchObject({ v: 1, kind: 'coast-cut' });
+  expect(manifest.takeDetails.map((t) => t.actorId)).toEqual(['player', 'player']);
+  expect(manifest.cells[0]!.id).toBe('butterfly');
+  expect(manifest.shot).toMatchObject({ frames: 26, fps: 10, bars: [1, 1], look: '35mm-dusk' });
+  expect(manifest.video?.bytes).toBe(cut.bytes);
+  expect(manifest.video?.sha256).toMatch(/^[0-9a-f]{64}$/);
+  expect(manifest.app.version).toMatch(/^\d+\.\d+\.\d+$/);
   // A portrait cut (9:16) composes the same frames tall — the camera's vertical field stays, the sides crop.
   const tall = await page.evaluate(() => window.__coastExport!({ width: 90, height: 160, fps: 5, bars: [1, 1] }));
   expect(tall.frames).toBe(13);
@@ -71,7 +88,10 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   await expect(page.locator('.mc-state')).toBeVisible(); // the live loop resumed (the card keeps updating)
   // The reel (MIS-4): the mission's slot is filled and its button plays the best take back.
   await expect(page.locator('#coast-reel')).toBeVisible();
-  await expect(page.locator('#coast-reel .rl-bar.earned')).toHaveCount(0); // ☆☆☆ takes fill nothing
+  // Bars fill only for a ≥ 1★ verdict: the mission's eight bars, or none. (Which of the two this short noon take earns
+  // depends on where the ground put the crate — the reel's rule is what is under test.)
+  const stars = ((await page.locator('.mc-stars').first().textContent()) ?? '').split('★').length - 1;
+  await expect(page.locator('#coast-reel .rl-bar.earned')).toHaveCount(stars >= 1 ? 8 : 0);
   await expect(page.locator('#coast-reel button[data-mission="m01-low-and-slow"]')).toBeEnabled();
   expect(errors, errors.join('\n')).toHaveLength(0);
 });

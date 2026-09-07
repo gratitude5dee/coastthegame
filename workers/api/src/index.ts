@@ -10,12 +10,14 @@
  *   GET  /perf                           the dashboard (HTML)
  *   PUT  /api/takes/:id · GET /api/takes · GET /api/takes/:id      take.bin per session (ACT-4)
  *   PUT  /api/cuts/:id  · GET /api/cuts/:id (range-aware) · GET /c/:id (share page)   Coast Cuts (STU-3)
+ *   PUT  /api/cuts/:id/manifest · GET /api/cuts/:share/manifest     provenance manifest next to the cut (STU-5)
  *
  * Sessions are a client-minted id in `x-coast-session` (guest); OAuth + wallet sign-in (ID-*) binds them later.
  * Local dev: `pnpm --filter @coast/api dev` runs workerd with emulated R2/DO; the Vite dev server proxies /api to it.
  */
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { manifestSummary, validateManifest, type CutManifest } from '../../../packages/studio/src/provenance';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -43,6 +45,7 @@ export const LIMITS = {
   reportBytes: 16 * 1024,
   takeBytes: 4 * 1024 * 1024, // ≈ 40 min of 30 Hz poses; a 60 s take is ~95 KB
   cutBytes: 64 * 1024 * 1024, // 60 s of 1080p30 H.264 at 8 Mb/s
+  manifestBytes: 32 * 1024,
   takesPerSession: 200,
   cutsPerSession: 50,
 } as const;
@@ -202,10 +205,19 @@ export function createApp() {
     const key = `${prefix}${id}.${ext}`;
     const previous = await c.env.USER_BUCKET.head(key);
     const title = c.req.header('x-coast-title') ?? previous?.customMetadata?.title ?? ''; // a re-upload keeps its title
-    await c.env.USER_BUCKET.put(key, c.req.raw.body, {
-      httpMetadata: { contentType: type.split(';')[0] },
-      customMetadata: { session, title: title.slice(0, 120) },
-    });
+    // The manifest's hash of the file (STU-5): R2 refuses the object when the bytes do not match it.
+    const sha256 = c.req.header('x-coast-sha256')?.toLowerCase();
+    if (sha256 && !/^[0-9a-f]{64}$/.test(sha256)) return c.json({ error: 'x-coast-sha256 must be 64 hex chars' }, 400);
+    try {
+      await c.env.USER_BUCKET.put(key, c.req.raw.body, {
+        httpMetadata: { contentType: type.split(';')[0] },
+        customMetadata: { session, title: title.slice(0, 120), ...(sha256 ? { sha256 } : {}) },
+        ...(sha256 ? { sha256 } : {}),
+      });
+    } catch (e) {
+      if (sha256) return c.json({ error: 'the upload does not match its sha256', detail: String(e) }, 400);
+      throw e;
+    }
     // A cut is public by link: a random share token (never the session id) indexes the object.
     const existing = await c.env.USER_BUCKET.get(`${prefix}${id}.share`);
     const share = (await existing?.text()) ?? shareToken();
@@ -214,6 +226,36 @@ export function createApp() {
       httpMetadata: { contentType: 'application/json' },
     });
     return c.json({ ok: true, key, share, url: `/c/${share}`, video: `/api/cuts/${share}` });
+  });
+
+  // STU-5: the provenance manifest sits next to the cut (`<id>.json`) and is public with it.
+  app.put('/api/cuts/:id/manifest', async (c) => {
+    const id = c.req.param('id');
+    if (!ID_RE.test(id)) return c.json({ error: 'bad cut id' }, 400);
+    const len = Number(c.req.header('content-length') ?? '0');
+    if (!len || len > LIMITS.manifestBytes) return c.json({ error: `manifest must be 1–${LIMITS.manifestBytes} bytes` }, 413);
+    const session = c.get('session');
+    const prefix = `cuts/${session}/`;
+    const listed = await c.env.USER_BUCKET.list({ prefix: `${prefix}${id}.` });
+    const video = listed.objects.find((o) => /\.(mp4|webm)$/.test(o.key));
+    if (!video) return c.json({ error: 'upload the cut first' }, 404);
+    const manifest = (await c.req.json().catch(() => null)) as CutManifest | null;
+    const problems = validateManifest(manifest);
+    if (!manifest || problems.length) return c.json({ error: 'not a cut manifest', problems }, 400);
+    if (manifest.id !== id) return c.json({ error: 'manifest id must match the cut id' }, 400);
+    const stored = (await c.env.USER_BUCKET.head(video.key))?.customMetadata?.sha256; // list() omits custom metadata
+    if (stored && manifest.video?.sha256 && stored !== manifest.video.sha256)
+      return c.json({ error: 'manifest hash differs from the cut' }, 409);
+    await c.env.USER_BUCKET.put(`${prefix}${id}.json`, JSON.stringify(manifest), { httpMetadata: { contentType: 'application/json' } });
+    return c.json({ ok: true, summary: manifestSummary(manifest) });
+  });
+
+  app.get('/api/cuts/:share/manifest', async (c) => {
+    const cut = await findCut(c.env.USER_BUCKET, c.req.param('share'));
+    if (!cut) return c.json({ error: 'not found' }, 404);
+    const obj = await c.env.USER_BUCKET.get(cut.key.replace(/\.(mp4|webm)$/, '.json'));
+    if (!obj) return c.json({ error: 'no manifest for this cut' }, 404);
+    return new Response(obj.body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } });
   });
 
   app.get('/api/cuts/:share', async (c) => {
@@ -242,8 +284,13 @@ export function createApp() {
   app.get('/c/:share', async (c) => {
     const share = c.req.param('share');
     const cut = await findCut(c.env.USER_BUCKET, share);
-    if (!cut) return c.html(sharePage(null, share), 404);
-    return c.html(sharePage(cut, share));
+    if (!cut) return c.html(sharePage(null, share, null), 404);
+    const manifest = (await (
+      await c.env.USER_BUCKET.get(cut.key.replace(/\.(mp4|webm)$/, '.json'))
+    )
+      ?.json()
+      .catch(() => null)) as CutManifest | null;
+    return c.html(sharePage(cut, share, manifest && validateManifest(manifest).length === 0 ? manifest : null));
   });
 
   app.all('/api/*', (c) => c.json({ error: 'not found' }, 404));
@@ -367,15 +414,25 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}td.bad{color:#ff6b6b}a{c
 <table><thead><tr><th>received</th><th>tier</th><th>device</th><th>fps</th><th>p95 ms</th><th>session</th></tr></thead><tbody>${rows || '<tr><td colspan="6">no reports yet — open the game with <code>?perf=1</code> and press “Send report”</td></tr>'}</tbody></table>`;
 }
 
-function sharePage(cut: CutInfo | null, share: string): string {
+function sharePage(cut: CutInfo | null, share: string, manifest: CutManifest | null): string {
   const title = cut?.title || 'a Coast Cut';
+  // The credits (STU-5): what the cut was made from, straight from its manifest.
+  const credits = manifest
+    ? `<p class="credits">${esc(manifestSummary(manifest))}<br><span>${manifest.takeDetails
+        .map((t) => `${esc(t.actorId)} · ${t.durationS.toFixed(1)} s`)
+        .join(
+          ' · ',
+        )} · made ${esc(manifest.createdAt.slice(0, 10))} with coast ${esc(manifest.app.version)}${manifest.app.commit ? ` (${esc(manifest.app.commit)})` : ''}${
+        manifest.video?.sha256 ? ` · sha256 ${esc(manifest.video.sha256.slice(0, 12))}…` : ''
+      } · <a href="/api/cuts/${esc(share)}/manifest">manifest</a></span></p>`
+    : '';
   const body = cut
-    ? `<video controls autoplay muted playsinline loop src="/api/cuts/${esc(share)}"></video><p>${esc(title)} · ${(cut.size / 1e6).toFixed(1)} MB · <a href="/api/cuts/${esc(share)}" download>download</a> · <a href="/">make your own →</a></p>`
+    ? `<video controls autoplay muted playsinline loop src="/api/cuts/${esc(share)}"></video><p>${esc(title)} · ${(cut.size / 1e6).toFixed(1)} MB · <a href="/api/cuts/${esc(share)}" download>download</a> · <a href="/">make your own →</a></p>${credits}`
     : `<p>this cut is gone (or never was) · <a href="/">make your own →</a></p>`;
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} · $COAST</title>
 <meta property="og:title" content="${esc(title)} · $COAST the Game"><meta property="og:type" content="video.other">${cut ? `<meta property="og:video" content="/api/cuts/${esc(share)}">` : ''}
 <style>body{font:14px system-ui,sans-serif;background:#0b0a10;color:#f2ecdc;margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box}
-video{width:min(960px,100%);aspect-ratio:16/9;background:#000;border-radius:12px}p{opacity:.8}a{color:#ffb54a}</style>
+video{width:min(960px,100%);aspect-ratio:16/9;background:#000;border-radius:12px}p{opacity:.8}a{color:#ffb54a}.credits{font-size:12px;opacity:.65;max-width:960px}.credits span{opacity:.8}</style>
 <main><h1 style="font-size:16px;letter-spacing:.08em;text-transform:uppercase;color:#ffb54a;margin:0 0 12px">$COAST · the cut</h1>${body}</main>`;
 }
 

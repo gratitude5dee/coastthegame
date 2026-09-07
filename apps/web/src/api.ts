@@ -3,7 +3,7 @@
  * serves the PWA), proxied by the Vite dev server to `wrangler dev` locally. Everything here is optional — when the
  * API is down the game plays on: takes stay in IndexedDB, cuts stay as downloads.
  */
-import { encodeTake, type TakeV1 } from '@coast/studio';
+import { encodeTake, type CutManifest, type TakeV1 } from '@coast/studio';
 
 let health: Promise<boolean> | null = null;
 
@@ -38,12 +38,17 @@ export interface SharedCut {
 }
 
 /** Push an exported cut and get its share link (STU-3). Null when the API is away or refuses. */
-export async function uploadCut(sessionId: string, id: string, blob: Blob, title: string): Promise<SharedCut | null> {
+export async function uploadCut(sessionId: string, id: string, blob: Blob, title: string, sha256?: string): Promise<SharedCut | null> {
   if (!(await apiAvailable(sessionId))) return null;
   try {
     const r = await fetch(`/api/cuts/${encodeURIComponent(id)}`, {
       method: 'PUT',
-      headers: { 'content-type': blob.type || 'video/mp4', 'x-coast-session': sessionId, 'x-coast-title': title.slice(0, 120) },
+      headers: {
+        'content-type': blob.type || 'video/mp4',
+        'x-coast-session': sessionId,
+        'x-coast-title': title.slice(0, 120),
+        ...(sha256 ? { 'x-coast-sha256': sha256 } : {}),
+      },
       body: blob,
     });
     if (!r.ok) return null;
@@ -51,6 +56,31 @@ export async function uploadCut(sessionId: string, id: string, blob: Blob, title
     return { share: j.share, url: new URL(j.url, location.origin).toString(), video: j.video };
   } catch {
     return null;
+  }
+}
+
+/** Attach the provenance manifest to an uploaded cut (STU-5); the share page shows it. False when the API is away. */
+export async function uploadCutManifest(sessionId: string, id: string, manifest: CutManifest): Promise<boolean> {
+  if (!(await apiAvailable(sessionId))) return false;
+  try {
+    const r = await fetch(`/api/cuts/${encodeURIComponent(id)}/manifest`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-coast-session': sessionId },
+      body: JSON.stringify(manifest),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** SHA-256 of a blob as lowercase hex (the manifest's video hash; the Worker checks the upload against it). */
+export async function sha256Hex(blob: Blob): Promise<string | undefined> {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return undefined;
   }
 }
 

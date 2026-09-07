@@ -3,7 +3,10 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { encodeTake } from '../../packages/studio/src/takes';
+import { buildCutManifest } from '../../packages/studio/src/provenance';
+import { planCut } from '../../packages/studio/src/export';
 import { parseRange, LIMITS } from '../../workers/api/src/index';
 
 /**
@@ -124,6 +127,96 @@ describe('Worker API (workerd, local R2 + DO)', () => {
     expect(html).toContain('Low &amp; slow');
     expect((await fetch(`${BASE}/c/nope-nope-nope-nope`)).status).toBe(404);
     expect((await fetch(`${BASE}/api/cuts/nope-nope-nope-nope`)).status).toBe(404);
+  });
+
+  it('cuts carry a provenance manifest (STU-5): hash-checked upload, manifest next to the file, credits on the share page', async () => {
+    const video = new Uint8Array(2048);
+    for (let i = 0; i < video.length; i++) video[i] = (i * 7) % 253;
+    const sha256 = createHash('sha256').update(video).digest('hex');
+    // A wrong hash is refused before anything is stored; the right one is kept with the object.
+    const wrong = await req('/api/cuts/cut-2', {
+      method: 'PUT',
+      body: video,
+      headers: { 'content-type': 'video/mp4', 'x-coast-sha256': 'ff'.repeat(32) },
+    });
+    expect(wrong.status).toBe(400);
+    expect(
+      (await req('/api/cuts/cut-2/manifest', { method: 'PUT', body: '{}', headers: { 'content-type': 'application/json' } })).status,
+    ).toBe(404);
+    const put = await req('/api/cuts/cut-2', {
+      method: 'PUT',
+      body: video,
+      headers: { 'content-type': 'video/mp4', 'x-coast-title': 'Hop on the one', 'x-coast-sha256': sha256 },
+    });
+    expect(put.status).toBe(200);
+    const { share, url } = await put.json();
+    const manifest = buildCutManifest({
+      id: 'cut-2',
+      title: 'Hop on the one',
+      missionId: 'm02-hop-on-the-one',
+      trackId: 'coast-demo',
+      barRange: [17, 20],
+      bpm: 92,
+      look: 'vhs-1994',
+      takes: [
+        {
+          id: 'take-1',
+          actorId: 'player',
+          cellVersion: 'valley',
+          durationS: 2,
+          startedAt: '2026-09-07T10:00:00.000Z',
+          samples: { length: 61 },
+          worldEdits: { length: 1 },
+        },
+      ],
+      plan: planCut({ durationS: 2, fps: 30 }),
+      captions: { length: 3 },
+      video: { bytes: video.length, mime: 'video/mp4', codec: 'avc', sha256 },
+      author: { userId: SESSION },
+      app: { version: '0.1.0', commit: 'test' },
+    });
+    // Not a manifest → 400 with the problems; a manifest for another cut id → 400; a hash that disagrees → 409.
+    const bad = await req('/api/cuts/cut-2/manifest', {
+      method: 'PUT',
+      body: JSON.stringify({ v: 1 }),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).problems).toContain('kind must be coast-cut');
+    expect(
+      (
+        await req('/api/cuts/cut-2/manifest', {
+          method: 'PUT',
+          body: JSON.stringify({ ...manifest, id: 'cut-9' }),
+          headers: { 'content-type': 'application/json' },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await req('/api/cuts/cut-2/manifest', {
+          method: 'PUT',
+          body: JSON.stringify({ ...manifest, video: { ...manifest.video, sha256: 'ee'.repeat(32) } }),
+          headers: { 'content-type': 'application/json' },
+        })
+      ).status,
+    ).toBe(409);
+    const ok = await req('/api/cuts/cut-2/manifest', {
+      method: 'PUT',
+      body: JSON.stringify(manifest),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).summary).toBe('1 take · valley · 1080p30 · vhs-1994');
+    // Public by the share token, like the cut itself; the share page carries the credits.
+    const back = await (await fetch(`${BASE}/api/cuts/${share}/manifest`)).json();
+    expect(back).toMatchObject({ v: 1, kind: 'coast-cut', id: 'cut-2', takes: ['take-1'], video: { sha256 } });
+    const html = await (await fetch(`${BASE}${url}`)).text();
+    expect(html).toContain('1 take · valley · 1080p30 · vhs-1994');
+    expect(html).toContain('player · 2.0 s');
+    expect(html).toContain(`sha256 ${sha256.slice(0, 12)}`);
+    expect(html).toContain(`/api/cuts/${share}/manifest`);
+    expect((await fetch(`${BASE}/api/cuts/nope-nope-nope-nope/manifest`)).status).toBe(404);
   });
 
   it('perf reports land in R2 and the dashboard lists them', async () => {

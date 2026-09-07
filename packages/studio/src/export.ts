@@ -32,6 +32,8 @@ export interface CutPlan {
   endS: number;
   frameCount: number;
   cameraLayer: number;
+  /** The bar range the plan was cut to, when it was (kept for the provenance manifest, STU-5). */
+  bars?: [number, number];
 }
 
 export const CUT_MAX_SECONDS = 60;
@@ -63,6 +65,7 @@ export function planCut(o: CutOptions): CutPlan {
     endS: startS + frameCount / fps,
     frameCount,
     cameraLayer: o.cameraLayer ?? -1,
+    ...(o.bars ? { bars: [Math.min(o.bars[0], o.bars[1]), Math.max(o.bars[0], o.bars[1])] as [number, number] } : {}),
   };
 }
 

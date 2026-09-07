@@ -397,6 +397,18 @@ TypeScript sources of truth live next to the code (`packages/engine/src/world/ce
   "refs": [{ "deictic": "that", "ordinal": 1 }, { "deictic": "there", "ordinal": 1 }],
   "expect": [{ "id": "taco_truck", "minConfidence": 0.9 }, { "pos": [4, 0, -9], "minConfidence": 0.9 }] }
 ```
+```jsonc
+// cuts/<session>/<id>.json (SCH-7) — the provenance manifest next to every exported Cut (STU-5); public with the cut's share token; the NFT metadata source (ID-*)
+{ "v": 1, "kind": "coast-cut", "id": "m01-low-and-slow-k2hz", "title": "Low & slow", "createdAt": "2026-09-07T10:05:00Z",
+  "app": { "name": "coast-the-game", "version": "0.1.0", "commit": "e945f91" }, "author": { "userId": "<session or user id>", "wallet": "…" },
+  "level": { "id": "sample-strip", "version": "2026-09-07.1" }, "cells": [{ "id": "valley", "version": "…" }],
+  "takes": ["t1", "t2"], "takeDetails": [{ "id": "t1", "actorId": "player", "cellVersion": "…", "durationS": 12.4, "startedAt": "…", "samples": 373, "edits": 3, "props": 1 }],
+  "shot": { "cameraTake": "t2", "fps": 30, "width": 1920, "height": 1080, "aspect": "16:9", "startS": 0, "endS": 12.4, "frames": 372, "bars": [9, 16], "look": "35mm-dusk", "captions": 4 },
+  "missions": ["m01-low-and-slow"], "trackId": "coast-01", "barRange": [9, 16], "audio": { "trackId": "coast-01", "bpm": 92, "muxed": false },
+  "generative": [{ "engine": "fal", "model": "minimax/h3-max-turbo", "prompt": "…", "seed": 7, "span": [2, 7], "costUsd": 0.12 }],
+  "prompts": ["…"], "models": ["fal/minimax/h3-max-turbo"], "seeds": [7], "references": [{ "kind": "image", "sha256": "…", "name": "ref.jpg" }], "userRefs": ["<sha256>"],
+  "costUsd": 0.12, "video": { "bytes": 2400000, "mime": "video/mp4", "codec": "avc", "sha256": "…" } }   // the upload is refused unless the file hashes to `video.sha256`
+```
 
 ---
 
@@ -470,7 +482,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 
 ### M6 — Studio & generative video (target: 1.5 weeks)
 - [~] Offline re-render (STU-1) ✓ beauty only — control passes (STU-2) pending; Mediabunny video export ✓ + server-side audio mux pending (STU-3); R2 upload ✓; replay on the billboard ✓.
-- [~] Cut assembly: captions (title, markers, end card), a look per mission, 16:9 + 9:16 ✓; beat-grid assembly across missions and the provenance manifest (STU-5) pending.
+- [~] Cut assembly: captions (title, markers, end card), a look per mission, 16:9 + 9:16 ✓; **provenance manifest (STU-5)** ✓ (SCH-7, hash-checked upload, credits on the share page); beat-grid assembly across missions pending.
 - [ ] fal jobs: H3 Max Turbo draft (sync, ≤2/mission), VACE faithful + H3 hero (async, post-session, GEN-6) via Queue + DO status; Dream mode via Lucy on desktop behind the premium flag (GEN-5).
 - [ ] **Gate:** QB-9 (30 s cut ≤3 min) and QB-10 budget ledger enforced with the §3.1 per-step table.
 
