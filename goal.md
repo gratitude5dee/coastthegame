@@ -425,11 +425,11 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 
 ### M0 — Foundation (target: 3 days)
 - [x] Monorepo boots: `pnpm i && pnpm dev` serves `apps/web`; `pnpm build` produces a Worker-deployable bundle. *(seed done)*
-- [ ] `pnpm deploy` publishes to Cloudflare (preview URL in PR) once D-0 secrets exist; Worker migrated to Hono; R2 CORS allows `Range` and exposes `Content-Range`/`Accept-Ranges` for cross-origin `.rad` paging.
-- [x] `three@0.180.0` + Spark 2.1 render a sample `.spz` with `SparkControls`; tier detection + `budgets.ts`; PWA manifest. *(seed done)* — [ ] service worker shell (offline app shell only).
+- [~] `pnpm deploy` publishes to Cloudflare (preview URL in PR) once D-0 secrets exist; **Worker migrated to Hono** ✓ (`workers/api`: sessions, budget ledger, takes/cuts/perf in R2, share pages; `tests/api` runs it on workerd); R2 CORS allows `Range` and exposes `Content-Range`/`Accept-Ranges` for cross-origin `.rad` paging.
+- [x] `three@0.180.0` + Spark 2.1 render a sample `.spz` with `SparkControls`; tier detection + `budgets.ts`; PWA manifest. *(seed done)* — [x] service worker shell (offline app shell only).
 - [x] Playwright + SwiftShader screenshot harness (`pnpm test:e2e`) captures deterministic shots at `/?scene=<id>&cam=<preset>&t=<seconds>&shot=1` with baseline diffs; vitest unit harness; GitHub Actions CI runs both. *(seed done; extend to cells in M2)*
-- [ ] `/perf` in-app route (`performance.mark`s for QB-3/4/5, frame histogram) + `/api/perf/report` (size-capped, session-authenticated) + dashboard stub; **IWER** wired into the e2e harness so WebXR code paths run headless.
-- [ ] Code-split Spark/three; Rapier + MediaPipe on demand (QB-3).
+- [x] `/perf` in-app route (`performance.mark`s for QB-3/4/5, frame histogram) + `/api/perf/report` (size-capped, session-authenticated) + dashboard (`GET /perf` on the Worker); **IWER** wired into the e2e harness so WebXR code paths run headless.
+- [x] Code-split Spark/three; Rapier, Recast and Mediabunny on demand (QB-3) — MediaPipe pending.
 - [ ] `scripts/setup.sh` provisions a Codex environment (Node 22, pnpm, prebuilt `build-lod` with Rust fallback, Python + Blender headless, ffmpeg, gltf-transform + KTX-Software `toktx`, Playwright chromium) in ≤10 min — validated in a fresh sandbox.
 
 ### M1 — Art direction pack (target: 2 days, parallel with M0)
@@ -439,38 +439,38 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 ### M2 — World v0: The Coast Block (target: 1 week) — **requires D-2 (Marble commercial terms) answered before spend**
 - [ ] Marble worlds generated for the hub + 4 cells from approved key art (+ text), exported (.spz 500k/full + collider + pano), orientation/scale fixed, `.rad` built, cells published to R2 with `cell.json` (SCH-1) + `level.json` (SCH-2); `docs/cells.md` lists costs.
 - [ ] Rapier trimesh from colliders; PHY-5 alignment ≤3% on every cell; spawn points and zones authored.
-- [ ] Cell graph with streaming (W-3): walk from Garage → Pier → Alley without a loading screen; ≤2 cells resident.
+- [~] Cell graph with streaming (W-3): walk from Garage → Pier → Alley without a loading screen; ≤2 cells resident — the streaming skeleton runs on the sample worlds (ADR-0009) until the Marble cells land.
 - [ ] Time-of-day presets (W-5) and fog modifier; pano skybox loading choreography (UX-3).
 - [ ] **Perf:** QB-1/2/3 met on desktop; Quest 3 and iPhone at least *render* the hub within budget (full gates at M3).
 
 ### M3 — Actor mode on all three platforms (target: 1 week)
-- [ ] Kinematic character controller (PHY-1) with intents from KB/M, touch sticks, gamepad, XR sticks/teleport; camera in `actor` mode; footsteps.
-- [ ] Grab/throw 5 props (PHY-2); SDF tagging on the alley wall (W-4); VR hands touch the fog (dyno) and paint (SDF spheres) — Quest 3.
-- [ ] Lowrider drivable with hydraulics on the beat (PHY-3) — all platforms (touch: on-screen pedals).
+- [x] Kinematic character controller (PHY-1) with intents from KB/M, touch sticks, gamepad, XR sticks/teleport; camera in `actor` mode; footsteps (procedural, by stride).
+- [~] Grab/throw 5 props (PHY-2) ✓; SDF tagging (W-4) ✓ (spray cans, global SplatEdit); VR hands touch the fog (dyno) and paint (SDF spheres) — Quest 3 pending (controllers paint today).
+- [x] Lowrider drivable with hydraulics on the beat (PHY-3) — all platforms (touch: on-screen pedals); placeholder body until the Tripo hero car.
 - [ ] **Gates:** QB-1/2/3 on desktop, Quest 3, iPhone (real-device `/perf` reports attached). (QB-4 moves to M3.5.)
 
 ### M3.5 — Vertical slice (target: 1 week) — the partner demo; the exact ID list is the scope
-- [ ] CAM-1, CAM-2 (over-shoulder + orbit; no VR diorama yet), QB-4 gate.
-- [ ] ACT-1, ACT-2 (record/replay of the player only), STU-1 (beauty only), STU-3 (video-only export; server mux stub).
-- [ ] The **Photographer** NPC (placeholder rig) hands out **one hard-coded mission** (SCH-3) with the shot meter (MIS-2) and verdict (MIS-3); the billboard replays the take.
-- [ ] Put-that-there via **mouse/touch fallback only** (click object → click place) with ghost preview + undo — voice arrives in M5.
-- [ ] Golden path steps 1–5 playable end-to-end on desktop; steps 1–3 on Quest 3 and iPhone.
+- [~] CAM-1, CAM-2 (over-shoulder + orbit) ✓, CAM-3 VR diorama ✓ (pick/place write-back pending); QB-4 gate needs the device reports.
+- [x] ACT-1, ACT-2 (record/replay: root poses, world edits, moving props; bone tracks with the rigs), STU-1 (beauty, fixed-step), STU-3 (video-only MP4 export via WebCodecs + Mediabunny, R2 upload + share page; server mux pending).
+- [x] The **Photographer** NPC (placeholder rig) hands out **two hard-coded missions** (SCH-3) with the shot meter (MIS-2) and verdict (MIS-3); the billboard replays the take; the reel (MIS-4) fills bar by bar.
+- [x] Put-that-there via **mouse/touch fallback** (click object → click place) with ghost preview + undo; the typed `/` bar and browser push-to-talk drive the same acts ahead of M5 (ADR-0006).
+- [~] Golden path steps 1–5 playable end-to-end on desktop (on the sample valley); steps 1–3 on Quest 3 and iPhone pending the device pass (`pnpm dev:https`).
 
 ### M4 — Characters & NPCs (target: 1 week)
 - [ ] $COAST hero rigged with the full CHR-2 clip set; anim state machine; 3 outfits; rig validator in CI (ADR-0002).
 - [ ] Avatar pipeline (CHR-4) end-to-end from a selfie ≤4 min with **6 onboarding clips** (idle/walk/run/jump/wave/point), remaining clips retargeted async (QB-8), plus 8 premade avatars and randomize.
-- [ ] 7 NPCs with navmesh loiter/approach and cached dialogue + TTS (AUD-1); talk to any NPC by proximity + `interact`.
-- [ ] Possess / record / replay (ACT-1…4) with a 3-take blocking demo and world-edit replay (tags repaint).
+- [~] 7 NPCs with navmesh loiter/approach and cached dialogue + TTS (AUD-1) — 4 NPCs on a runtime navmesh with browser speech for the lines; talk by proximity ✓ (`interact` pending).
+- [x] Possess / record / replay (ACT-1…4) with multi-take blocking (the set), possession by V / voice, world-edit replay for props; tags persist in the world rather than repaint (ADR-0007).
 
 ### M5 — Director mode & voice (target: 1.5 weeks)
-- [ ] CameraRig CAM-3 (VR diorama), CAM-6/7 (cinematic controls, keyframed paths), CAM-8 role partition.
-- [ ] Realtime voice via WebRTC with ephemeral secrets and PTT speech windows (DIR-1); mode-gated tool schema (DIR-2); deixis resolver against **≥60 fixture cases** (SCH-6) with QB-6 precision computed by the test; ghost preview + undo; `FakeRealtime` transcript replay in CI (DIR-6).
+- [~] CameraRig CAM-3 (VR diorama) ✓, CAM-6 (shots, moves, lenses, follow / look at by direction) ✓, CAM-7 keyframed paths pending, CAM-8 role partition ✓ (tools per mode).
+- [~] Realtime voice via WebRTC with ephemeral secrets and VAD speech windows (DIR-1) — client + Worker built, live once the key lands; mode-gated tool schema (DIR-2) ✓; deixis resolver fixtures (SCH-6) — 17 cases today, ≥60 pending; ghost preview + undo ✓; `FakeRealtime` transcript replay in CI (DIR-6) ✓.
 - [ ] `docs/director-grammar.md` + a **nightly** e2e voice suite: 10 TTS-generated utterances against the real API → expected acts; ≥9/10.
 - [ ] Astra planner (DIR-5): mission brief → shot list JSON; **12 missions authored by the planner and approved by GRATITUD3** (MIS-5).
 
 ### M6 — Studio & generative video (target: 1.5 weeks)
-- [ ] Offline re-render with control passes for faithful spans (STU-1/2), Mediabunny video export + server-side audio mux (STU-3), R2 upload; replay on the billboard.
-- [ ] Cut assembly on the beat grid with captions, 16:9 + 9:16 (STU-4); provenance manifest (STU-5).
+- [~] Offline re-render (STU-1) ✓ beauty only — control passes (STU-2) pending; Mediabunny video export ✓ + server-side audio mux pending (STU-3); R2 upload ✓; replay on the billboard ✓.
+- [~] Cut assembly: captions (title, markers, end card), a look per mission, 16:9 + 9:16 ✓; beat-grid assembly across missions and the provenance manifest (STU-5) pending.
 - [ ] fal jobs: H3 Max Turbo draft (sync, ≤2/mission), VACE faithful + H3 hero (async, post-session, GEN-6) via Queue + DO status; Dream mode via Lucy on desktop behind the premium flag (GEN-5).
 - [ ] **Gate:** QB-9 (30 s cut ≤3 min) and QB-10 budget ledger enforced with the §3.1 per-step table.
 
