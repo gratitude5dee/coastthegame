@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "dev:https": "COAST_HTTPS=1 vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host --port 4173",
     "typecheck": "tsc --noEmit",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@types/three": "0.180.0",
+    "@vitejs/plugin-basic-ssl": "2.3.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.3"
   }

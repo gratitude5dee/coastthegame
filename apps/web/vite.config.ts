@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import basicSsl from '@vitejs/plugin-basic-ssl';
 
 /**
  * Code-splitting (goal.md QB-3 / W-1): three and Spark each get their own long-lived, hash-named chunk so the app
@@ -15,6 +16,9 @@ function manualChunks(id: string): string | undefined {
 }
 
 export default defineConfig({
+  // `pnpm dev:https` — WebXR (Quest, Vision Pro) and the microphone need a secure context off localhost: a self-signed
+  // cert on the LAN URL (accept the browser's warning once on the headset / phone).
+  plugins: process.env.COAST_HTTPS === '1' ? [basicSsl()] : [],
   server: {
     port: 5173,
     // The Worker (`pnpm dev:api` → wrangler dev on :8787) serves the API, share pages and the perf dashboard; in

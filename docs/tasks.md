@@ -38,7 +38,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(id)` = goal.md requir
 - [x] Grab/throw primitive props + click-to-select → click-to-place put-that-there with ghost + undo; **spray-paint tagging** (`packages/engine/src/world/paint.ts`: global Spark SplatEdit, SDF sphere puffs, strokes/undo, per-tier SDF budget; two cans, click/trigger sprays within arm's reach, logged as `sdfPaint` take edits) — VR hands pending
 - [x] Lowrider raycast vehicle (`packages/engine/src/vehicles/lowrider.ts`: Rapier DynamicRayCastVehicleController, arcade tuning pinned by Node tests) + hydraulics (held switches I/J/K/L · d-pad · LIFT, hops with corner impulses) + enter/exit + chase/driver cams + touch pedals (PHY-3); beat grid `BeatClock` + metronome drive auto-hops (H) — placeholder body until the Tripo hero car (M4)
 - [x] M3.5 slice: missions 1–2 (`MISSIONS_V0`: Low & slow → Hop on the one, beatSync judged on manual hops), take clip via `captureStream(0)` + `requestFrame` (robust at low fps), Photographer hands out the next mission after a ≥1★ verdict
-- [ ] Gates QB-1/2/3/4 with real-device `/perf` reports (desktop, Quest 3, iPhone)
+- [ ] Gates QB-1/2/3/4 with real-device `/perf` reports (desktop, Quest 3, iPhone) — `pnpm dev:https` serves the LAN URL over TLS for the headset / phone pass
 
 ## M4 — Characters & NPCs (CHR-_, ACT-_)
 
