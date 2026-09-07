@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { writeFileSync } from 'node:fs';
 
 /** Rendered-frame counter (the game bumps it once per drawn frame). */
 const frame = () => (window as unknown as { __coastFrame?: number }).__coastFrame ?? 0;
@@ -45,6 +46,7 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   );
   await page.locator('.mc-actions button', { hasText: /take/i }).first().click(); // retake
   await expect(page.locator('.mc-state')).toContainText(/Take 2/i);
+  const f1 = await page.evaluate(frame);
   await page.keyboard.press('Enter'); // roll take 2
   // Take 1 performs again (a ghost on the take clock) while take 2 rolls. A second capture crawls on software GL (the
   // encoder starves the 2-core renderer: a frame every ~15 s), so from here the waits are generous and frame-free.
@@ -55,6 +57,10 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
     null,
     { timeout: 60_000 },
   );
+  // A take needs two samples to join the set: let a few frames render before the cut (the post stack makes a frame dearer).
+  await page.waitForFunction((f) => ((window as unknown as { __coastFrame?: number }).__coastFrame ?? 0) >= f + 4, f1, {
+    timeout: 120_000,
+  });
   await page.keyboard.press('Enter'); // cut
   await page.waitForSelector('.mc-verdict', { timeout: 120_000 });
   await page.waitForFunction(() => (window as unknown as { __coastStudio?: S }).__coastStudio?.setSize === 2, null, { timeout: 60_000 });
@@ -85,14 +91,32 @@ test('mission slice: roll, cut, verdict, clip', async ({ page }) => {
   expect(tall.bytes).toBeGreaterThan(500);
   expect(cut.bytes).toBeGreaterThan(2000);
   expect(cut.mime).toMatch(/^video\/(mp4|webm)/);
+  // Control passes (STU-2) for a faithful render: depth + pose videos and camera.json for a ≤ 5 s span at ≤ 720p —
+  // the first second here, at 5 fps, so software GL finishes in seconds.
+  const control = await page.evaluate(() => window.__coastExportControl!({ startS: 0, endS: 1, fps: 5, preview: true }));
+  for (const pass of ['depth', 'pose'] as const) {
+    const png = control.preview?.[pass];
+    expect(png).toMatch(/^data:image\/png;base64,/);
+    writeFileSync(`tests/e2e/__screenshots__/control-${pass}.png`, Buffer.from(png!.replace(/^data:image\/png;base64,/, ''), 'base64')); // human-viewable
+  }
+  expect(control.passes.depth).toMatchObject({ frames: 5, seconds: 1 });
+  expect(control.passes.pose).toMatchObject({ frames: 5, seconds: 1 });
+  expect(control.passes.depth!.bytes).toBeGreaterThan(500);
+  expect(control.passes.pose!.bytes).toBeGreaterThan(200);
+  expect(control.passes.depth!.mime).toMatch(/^video\/(mp4|webm)/);
+  expect(control.camera).toMatchObject({ frames: 5, width: 1280, height: 720, near: 0.25, far: 60 });
+  expect(control.camera.first).toMatchObject({ t: 0, cx: 640, cy: 360 });
+  expect((control.camera.first as { fy: number }).fy).toBeGreaterThan(300);
   await expect(page.locator('.mc-state')).toBeVisible(); // the live loop resumed (the card keeps updating)
   // The reel (MIS-4): the mission's slot is filled and its button plays the best take back.
   await expect(page.locator('#coast-reel')).toBeVisible();
   // Bars fill only for a ≥ 1★ verdict: the mission's eight bars, or none. (Which of the two this short noon take earns
   // depends on where the ground put the crate — the reel's rule is what is under test.)
-  const stars = ((await page.locator('.mc-stars').first().textContent()) ?? '').split('★').length - 1;
+  // (The card may already show the next brief by now — the Photographer moves on — so read the stars off the reel.)
+  const reelButton = page.locator('#coast-reel button[data-mission="m01-low-and-slow"]');
+  await expect(reelButton).toBeEnabled();
+  const stars = ((await reelButton.textContent()) ?? '').split('★').length - 1;
   await expect(page.locator('#coast-reel .rl-bar.earned')).toHaveCount(stars >= 1 ? 8 : 0);
-  await expect(page.locator('#coast-reel button[data-mission="m01-low-and-slow"]')).toBeEnabled();
   expect(errors, errors.join('\n')).toHaveLength(0);
 });
 

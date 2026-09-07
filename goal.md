@@ -485,7 +485,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 - [ ] Astra planner (DIR-5): mission brief → shot list JSON; **12 missions authored by the planner and approved by GRATITUD3** (MIS-5).
 
 ### M6 — Studio & generative video (target: 1.5 weeks)
-- [~] Offline re-render (STU-1) ✓ beauty only — control passes (STU-2) pending; Mediabunny video export ✓ + server-side audio mux pending (STU-3); R2 upload ✓; replay on the billboard ✓.
+- [~] Offline re-render (STU-1) ✓; **control passes (STU-2)** ✓ (ADR-0012: `depth` as one opacity-weighted image of splats + meshes, linear near-white with the near/far in `camera.json`; `pose` as an OpenPose figure on each actor's root pose until the rigs land; `camera.json` intrinsics + extrinsics per frame; ≤ 5 s spans at ≤ 720p as short WebCodecs videos; `__coastExportControl`) — `normal` / `id` pending; Mediabunny video export ✓ + server-side audio mux pending (STU-3); R2 upload ✓; replay on the billboard ✓.
 - [~] Cut assembly: captions (title, markers, end card), **the look per mission as the post LUT (MIS-6 / STU-4)** ✓ (five looks; _make it noir_ changes it and the manifest says so), 16:9 + 9:16 ✓; **provenance manifest (STU-5)** ✓ (SCH-7, hash-checked upload, credits on the share page); beat-grid assembly across missions pending.
 - [ ] fal jobs: H3 Max Turbo draft (sync, ≤2/mission), VACE faithful + H3 hero (async, post-session, GEN-6) via Queue + DO status; Dream mode via Lucy on desktop behind the premium flag (GEN-5).
 - [ ] **Gate:** QB-9 (30 s cut ≤3 min) and QB-10 budget ledger enforced with the §3.1 per-step table.

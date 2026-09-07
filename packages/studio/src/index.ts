@@ -8,6 +8,7 @@ export * from './export';
 export * from './reel';
 export * from './captions';
 export * from './provenance';
+export * from './control';
 import type { Provenance } from './provenance';
 
 export type PassName = 'beauty' | 'depth' | 'normal' | 'id' | 'pose';

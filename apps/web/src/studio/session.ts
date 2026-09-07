@@ -18,9 +18,14 @@ import {
   DEFAULT_BEAT_GRID,
   buildCutManifest,
   captionTrack,
+  planControl,
   planCut,
   setTime,
   takeStore,
+  type ActorPose,
+  type ControlPass,
+  type ControlPlanOptions,
+  type ControlSpan,
   type CutManifest,
   type CutOptions,
   type ConstraintResult,
@@ -35,6 +40,7 @@ import {
 import { createMissionCard, type MissionCard } from '../ui/missionCard';
 import { GhostActor, type ActorLook } from './ghosts';
 import { exportCut, type ExportResult, type ExportScene, type Overlay } from './exporter';
+import { exportControl, type ControlResult } from './control';
 import { sha256Hex, uploadCut, uploadCutManifest, uploadTake } from '../api';
 import { CameraPath, type CameraKey } from '@coast/engine';
 
@@ -115,6 +121,8 @@ export class StudioSession {
   private readonly propPose: PropPose = { t: 0, pos: [0, 0, 0], quat: [0, 0, 0, 1] };
   /** The game lends its renderer/scene/camera for an export (null on surfaces that cannot export, e.g. XR). */
   exportScene: (() => Omit<ExportScene, 'seek'>) | null = null;
+  /** The people in the cell, for the pose pass (STU-2) — the ghosts on set are added here. */
+  people: (() => ActorPose[]) | null = null;
   lastCutUrl: string | null = null;
   exporting = false;
   /** Guest session id (the Worker keys takes and cuts by it); empty = never upload. */
@@ -555,6 +563,7 @@ export class StudioSession {
             host.camera.quaternion.set(c.camQuat[0], c.camQuat[1], c.camQuat[2], c.camQuat[3]);
           },
           ...(host.frame ? { frame: host.frame } : {}),
+          ...(host.settle ? { settle: host.settle } : {}),
           ...(host.render ? { render: host.render } : {}),
           ...(host.prepare ? { prepare: host.prepare } : {}),
           end: () => {
@@ -568,6 +577,83 @@ export class StudioSession {
         overlay,
       );
       return { ...result, manifest: manifestFor(result, await sha256Hex(result.blob)) };
+    } finally {
+      this.exporting = false;
+    }
+  }
+
+  /**
+   * Control passes for a faithful render (STU-2): `depth` + `pose` videos and `camera.json` for a ≤ 5 s span of the
+   * cut, at ≤ 720p — the same set, camera and fixed step as the beauty export.
+   */
+  async exportControl(
+    opts: Partial<ControlSpan> &
+      ControlPlanOptions & { passes?: ControlPass[]; cut?: Omit<CutOptions, 'durationS'>; preview?: boolean } = {},
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<ControlResult> {
+    if (!this.exportScene) throw new Error('export is not available here');
+    if (this.set.size === 0) throw new Error('nothing to export — cut a take first');
+    if (this.exporting) throw new Error('already exporting');
+    const cut = planCut({ durationS: this.set.durationS, cameraLayer: this.set.size - 1, ...(opts.cut ?? {}) });
+    const plan = planControl(cut, { startS: opts.startS ?? cut.startS, endS: opts.endS ?? cut.endS }, opts);
+    const passes = opts.passes ?? ['depth', 'pose'];
+    const path = this.cameraPath && this.cameraPath.length >= 2 ? new CameraPath(this.cameraPath) : null;
+    const camLayer = this.set.layers[Math.min(Math.max(0, cut.cameraLayer), this.set.size - 1)]!;
+    const host = this.exportScene();
+    const wasPlaying = this.playing;
+    const camPose: TakePose = { pos: [0, 0, 0], yaw: 0, speed: 0, driving: false, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
+    const ghostPose: TakePose = { ...camPose, camPos: [0, 0, 0], camQuat: [0, 0, 0, 1] };
+    this.exporting = true;
+    this.stopPlayback();
+    let setTimeS = cut.startS;
+    try {
+      return await exportControl(
+        plan,
+        {
+          renderer: host.renderer,
+          scene: host.scene,
+          camera: host.camera,
+          ...(host.prepare ? { prepare: host.prepare } : {}),
+          ...(host.frame ? { frame: host.frame } : {}),
+          ...(host.settle ? { settle: host.settle } : {}),
+          begin: () => {
+            host.begin();
+            for (const g of this.ghosts) {
+              g.setSolid(true);
+              g.visible = true;
+            }
+          },
+          seek: (t) => {
+            setTimeS = t;
+            this.seekSet(t);
+            if (path) {
+              path.apply(host.camera, path.startS + (t - cut.startS));
+              return;
+            }
+            const c = camLayer.player.poseAt(t, camPose);
+            host.camera.position.set(c.camPos[0], c.camPos[1], c.camPos[2]);
+            host.camera.quaternion.set(c.camQuat[0], c.camQuat[1], c.camQuat[2], c.camQuat[3]);
+          },
+          actors: () => {
+            const out: ActorPose[] = this.people?.() ?? [];
+            for (let i = 0; i < this.ghosts.length; i++) {
+              const pose = this.set.poseAt(i, setTimeS, ghostPose);
+              if (!pose || pose.driving) continue; // the car has no skeleton
+              out.push({ feet: [pose.pos[0], pose.pos[1], pose.pos[2]], yaw: pose.yaw, speed: pose.speed, t: setTimeS });
+            }
+            return out;
+          },
+          end: () => {
+            for (const g of this.ghosts) g.setSolid(false);
+            host.end();
+            if (wasPlaying) this.startPlayback(performance.now(), true);
+            else for (const g of this.ghosts) g.visible = false;
+          },
+        },
+        passes,
+        onProgress,
+        { preview: !!opts.preview },
+      );
     } finally {
       this.exporting = false;
     }

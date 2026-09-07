@@ -21,6 +21,8 @@ export interface ExportScene {
   end: () => void;
   /** Camera-dependent per-frame work the live loop normally does (sky follow, fog origin) — after `seek`, before the render. */
   frame?: () => void;
+  /** Waits for the splat renderer to accumulate and sort for the frame's camera (Spark updates asynchronously otherwise). */
+  settle?: () => Promise<void>;
   /** Draws the frame — through the post stack (the mission's look as a LUT, W-5/MIS-6) when the host has one; else `renderer.render`. */
   render?: () => void;
   /** The look on the picture (the post stack's, which the director may have changed from the mission's) — for the manifest. */
@@ -103,6 +105,7 @@ export async function exportCut(
       const t = frameTime(plan, i);
       target.seek(t);
       target.frame?.();
+      await target.settle?.();
       draw();
       compositor.compose(canvas, t - plan.startS);
       await source.add(i * dt, dt);

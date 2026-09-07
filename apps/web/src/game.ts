@@ -170,6 +170,18 @@ declare global {
       height?: number;
       bars?: [number, number];
     }) => Promise<{ bytes: number; mime: string; codec: string; ext: string; frames: number; seconds: number; manifest: unknown }>;
+    /** QA: the control passes of a span of the set (STU-2): depth + pose videos and camera.json. */
+    __coastExportControl?: (opts?: {
+      startS?: number;
+      endS?: number;
+      passes?: ('depth' | 'pose')[];
+      fps?: number;
+      preview?: boolean;
+    }) => Promise<{
+      passes: Record<string, { bytes: number; mime: string; frames: number; seconds: number }>;
+      camera: { frames: number; width: number; height: number; near: number; far: number; first: unknown };
+      preview?: Record<string, string>;
+    }>;
     /** QA: put the player's feet somewhere (the streaming harness walks the level this way). */
     __coastTeleport?: (x: number, y: number, z: number) => boolean;
     /** QA: the canvas as a PNG data URL right after the next rendered frame (the screenshot harness). */
@@ -1538,10 +1550,15 @@ export class Game {
         this.exporting = true;
         this.rig.unlock();
         this.renderer.setAnimationLoop(null);
+        this.spark.autoUpdate = false;
         this.playerMesh.visible = false;
         this.props?.select(null);
       },
       frame: () => this.atmosphere.frame(this.camera),
+      // Spark's own update is asynchronous (a timeout, an accumulate, a sort on a worker, and the picture switches to
+      // the new set only once its sort is in): an offline frame waits for all of it, so every exported frame is
+      // accumulated and sorted for *its* camera and modifiers (`autoUpdate` is off meanwhile).
+      settle: () => this.settleSplats(),
       render: () => this.renderFrame(1 / 30),
       look: () => this.lookName,
       end: () => {
@@ -1552,6 +1569,7 @@ export class Game {
           this.postForExport = false;
         }
         this.exporting = false;
+        this.spark.autoUpdate = true;
         this.last = performance.now();
         this.renderer.setAnimationLoop((time) => this.tick(time));
         this.updateHint();
@@ -1564,6 +1582,30 @@ export class Game {
     window.__coastExport = async (opts) => {
       const r = await studio.exportCut(opts ?? {});
       return { bytes: r.blob.size, mime: r.mime, codec: r.codec, ext: r.ext, frames: r.frames, seconds: r.seconds, manifest: r.manifest };
+    };
+    // The people in the cell for the pose pass (STU-2); the ghosts on set are the session's own.
+    studio.people = () =>
+      (this.npcs?.npcs ?? []).map((n) => ({
+        feet: [n.mesh.position.x, n.mesh.position.y, n.mesh.position.z] as [number, number, number],
+        yaw: n.mesh.rotation.y,
+      }));
+    window.__coastExportControl = async (opts = {}) => {
+      const { fps, ...span } = opts;
+      const r = await studio.exportControl({ ...span, ...(fps ? { cut: { fps } } : {}) });
+      return {
+        ...(r.preview ? { preview: r.preview as Record<string, string> } : {}),
+        passes: Object.fromEntries(
+          Object.entries(r.passes).map(([k, v]) => [k, { bytes: v.blob.size, mime: v.mime, frames: v.frames, seconds: v.seconds }]),
+        ),
+        camera: {
+          frames: r.camera.frames.length,
+          width: r.camera.width,
+          height: r.camera.height,
+          near: r.camera.depth.near,
+          far: r.camera.depth.far,
+          first: r.camera.frames[0],
+        },
+      };
     };
     this.studio = studio;
     if (missionParam > 0) studio.brief(); // QA: `?mission=n` auto-briefs mission n
@@ -1658,6 +1700,20 @@ export class Game {
       return this.post;
     });
     return this.postLoading;
+  }
+
+  /**
+   * Accumulate and sort the splats for the current camera and modifiers and wait until that set is what draws
+   * (Spark keeps showing the last *sorted* set; with LoD the set changes with the view, so the sort is what settles it).
+   */
+  private async settleSplats(): Promise<void> {
+    const spark = this.spark;
+    await spark.update({ scene: this.scene, camera: this.camera });
+    const deadline = performance.now() + 4000;
+    while ((spark.sorting || spark.display !== spark.current) && performance.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 4));
+      if (!spark.sorting && spark.display !== spark.current) await spark.update({ scene: this.scene, camera: this.camera });
+    }
   }
 
   /** The look by name (MIS-6): remembered even where nothing renders it live, so the cut export gets it. */
