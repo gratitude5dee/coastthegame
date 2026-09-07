@@ -142,6 +142,7 @@ export class Corridor {
   private readonly textures: THREE.Texture[] = [];
   private readonly up: THREE.Vector3;
   private readonly fwd: THREE.Vector3;
+  private readonly fogMaterial: THREE.SpriteMaterial;
 
   constructor(
     readonly frame: CorridorFrame,
@@ -200,6 +201,7 @@ export class Corridor {
       opacity: 0.32,
       depthWrite: false,
     });
+    this.fogMaterial = fogMat;
     const n = opts.fogSprites ?? Math.max(2, Math.round(length / 9));
     for (let i = 0; i < n; i++) {
       const t = (i + 0.5) / n;
@@ -241,6 +243,11 @@ export class Corridor {
     // Both ends start gated; the host opens an end once the cell there has ground.
     this.setGate('a', true);
     this.setGate('b', true);
+  }
+
+  /** The fog sprites follow the atmosphere's fog colour (W-5). */
+  setFogColor(color: THREE.ColorRepresentation) {
+    this.fogMaterial.color.set(color);
   }
 
   gateClosed(end: CorridorEnd) {

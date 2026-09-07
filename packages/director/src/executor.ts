@@ -9,7 +9,7 @@ import { resolveObject, resolvePlace, type ResolveContext, type SceneIndex, type
 import { parseUtterance, type Meta, type Utterance } from './grammar';
 import type { ActEnvelope, ActResult, CameraMove, ObjectRef, RigMode, SceneAct, ShotName } from './schema';
 
-export type TimePresetName = 'golden' | 'blue' | 'night' | 'fog_noon';
+export type TimePresetName = 'noon' | 'golden' | 'blue' | 'night' | 'fog_noon';
 export type WeatherKind = 'fog' | 'clear' | 'rain';
 
 export interface CameraRequest {

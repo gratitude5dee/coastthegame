@@ -17,6 +17,8 @@ export interface ExportScene {
   seek: (tS: number) => void;
   begin: () => void;
   end: () => void;
+  /** Camera-dependent per-frame work the live loop normally does (sky follow, fog origin) — after `seek`, before the render. */
+  frame?: () => void;
 }
 
 /** What goes over the picture (cut assembly): a look (grade + vignette) and a caption track. */
@@ -93,6 +95,7 @@ export async function exportCut(
     for (let i = 0; i < plan.frameCount; i++) {
       const t = frameTime(plan, i);
       target.seek(t);
+      target.frame?.();
       renderer.render(scene, camera);
       compositor.compose(canvas, t - plan.startS);
       await source.add(i * dt, dt);

@@ -542,6 +542,7 @@ export class StudioSession {
             host.camera.position.set(c.camPos[0], c.camPos[1], c.camPos[2]);
             host.camera.quaternion.set(c.camQuat[0], c.camQuat[1], c.camQuat[2], c.camQuat[3]);
           },
+          ...(host.frame ? { frame: host.frame } : {}),
           end: () => {
             for (const g of this.ghosts) g.setSolid(false);
             host.end();

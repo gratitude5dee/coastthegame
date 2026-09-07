@@ -1,10 +1,15 @@
 import { test, expect } from '@playwright/test';
+import { writeFileSync } from 'node:fs';
 
 /**
  * Deterministic screenshot harness (AGENTS.md §2.4). `tier=desktop` forces desktop budgets under SwiftShader
  * (which would otherwise detect as 'fallback'); `shot=1` freezes time at `t`. Baselines are Linux-only
  * (CI + Codex sandboxes); `maxDiffPixelRatio` absorbs driver-level noise. Update with `--update-snapshots`
  * only in a PR that explains the visual change (art/DIFF.md).
+ *
+ * The picture is read straight off the WebGL canvas after a synchronous render (`__coastShot`), never through the
+ * compositor: under SwiftShader a compositor capture can land mid-frame (the sky drawn, the splats not yet) and
+ * `toHaveScreenshot` then never sees two stable frames. The HUD is DOM, so nothing needs masking.
  */
 const SHOTS = [
   { name: 'butterfly-director-t0', url: '/?scene=butterfly&cam=director&t=0&shot=1&tier=desktop' },
@@ -13,6 +18,7 @@ const SHOTS = [
 
 for (const shot of SHOTS) {
   test(`renders ${shot.name}`, async ({ page }) => {
+    test.setTimeout(300_000); // SwiftShader: a 1280×720 frame with the LoD built can take seconds; two stable captures take a while
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -25,9 +31,20 @@ for (const shot of SHOTS) {
     await page.waitForFunction((s) => ((window as unknown as { __coastFrame?: number }).__coastFrame ?? 0) >= s + 3, start, {
       timeout: 90_000,
     });
-    await page.screenshot({ path: `tests/e2e/__screenshots__/${shot.name}.png` }); // human-viewable copy
-    // toHaveScreenshot captures twice and requires stability; SwiftShader needs a long timeout. HUD text is masked.
-    await expect(page).toHaveScreenshot(`${shot.name}.png`, { maxDiffPixelRatio: 0.02, timeout: 120_000, mask: [page.locator('#hud')] });
+    // Right after the LoD tree lands, Spark can draw nothing for a run of frames: wait until the splats are a draw call
+    // (the sky is the other one), then until two captures a frame apart agree.
+    await page.waitForFunction(() => ((window as unknown as { __coastDraws?: number }).__coastDraws ?? 0) >= 2, null, { timeout: 120_000 });
+    const capture = () => page.evaluate(() => (window as unknown as { __coastShot: () => Promise<string> }).__coastShot(), null);
+    let dataUrl = await capture();
+    for (let i = 0; i < 8; i++) {
+      const next = await capture();
+      if (next === dataUrl) break;
+      dataUrl = next;
+    }
+    const png = Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ''), 'base64');
+    expect(png.length).toBeGreaterThan(1000);
+    writeFileSync(`tests/e2e/__screenshots__/${shot.name}.png`, png); // human-viewable copy
+    expect(png).toMatchSnapshot(`${shot.name}.png`, { maxDiffPixelRatio: 0.02 });
     expect(errors, errors.join('\n')).toHaveLength(0);
     expect(await page.locator('#hud').innerText()).toContain('tier desktop');
     // Guard against a silently empty frame (e.g. Spark auto-detection broken by `fileType: undefined`).

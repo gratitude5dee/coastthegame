@@ -13,6 +13,7 @@ export * from './xr/locomotion';
 export * from './world/paint';
 export * from './world/level';
 export * from './world/transition';
+export * from './world/grade';
 export * from './audio/stride';
 export * from './npc/brain';
 export * from './npc/crowd';

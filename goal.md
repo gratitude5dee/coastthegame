@@ -452,7 +452,7 @@ Order matters. Each milestone ends with: all ACs green, `docs/adr/` updated, a d
 - [ ] Marble worlds generated for the hub + 4 cells from approved key art (+ text), exported (.spz 500k/full + collider + pano), orientation/scale fixed, `.rad` built, cells published to R2 with `cell.json` (SCH-1) + `level.json` (SCH-2); `docs/cells.md` lists costs.
 - [ ] Rapier trimesh from colliders; PHY-5 alignment ≤3% on every cell; spawn points and zones authored.
 - [~] Cell graph with streaming (W-3): walk from Garage → Pier → Alley without a loading screen; ≤2 cells resident — the streaming skeleton runs on the sample worlds (ADR-0009) until the Marble cells land.
-- [ ] Time-of-day presets (W-5) and fog modifier; pano skybox loading choreography (UX-3).
+- [~] Time-of-day presets (W-5) and fog modifier ✓ — golden / blue hour / night / fog noon (+ noon) as a grade: a dyno colour modifier on every splat (tint, saturation, lift, exp² fog), a sky dome (gradient, sun, stars), matching lights for the meshes and `scene.fog`; presets dissolve into each other; `set_time` / `set_weather` drive it — post LUT and the pano env map pending; pano skybox loading choreography (UX-3) pending.
 - [ ] **Perf:** QB-1/2/3 met on desktop; Quest 3 and iPhone at least *render* the hub within budget (full gates at M3).
 
 ### M3 — Actor mode on all three platforms (target: 1 week)

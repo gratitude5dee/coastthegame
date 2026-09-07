@@ -1,4 +1,5 @@
 # art/DIFF.md — visual iteration log (QB-12)
 
-| date | shot | score/10 | what changed | next |
-| ---- | ---- | -------- | ------------ | ---- |
+| date       | shot                                      | score/10 | what changed                                                                                                                                                                                                                                                                                         | next                                                                                 |
+| ---------- | ----------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 2026-09-07 | butterfly-director-t0, butterfly-actor-t2 | —        | W-5: the sky dome replaces the flat background (noon gradient, sun), the atmosphere's noon fog (0.004) and lights replace the fixed hemisphere + sun; the butterfly itself is unchanged (noon tint is identity). Baselines regenerated (and now read off the canvas via `__coastShot`, no HUD mask). | grade the sample worlds' looks against `art/style/STYLE.md` once it exists; post LUT |

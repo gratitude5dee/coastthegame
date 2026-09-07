@@ -29,6 +29,8 @@ import {
   yawOf,
   zeroVehicleInput,
   HOP_CORNERS,
+  Atmosphere,
+  TIME_ORDER,
   CellStreamer,
   Corridor,
   LevelGraph,
@@ -39,6 +41,7 @@ import {
   type GroundGrid,
   type Portal,
   type StreamEvent,
+  type TimeOfDay,
   type HopPattern,
   type PlatformInfo,
   type RigMode,
@@ -96,14 +99,6 @@ interface ResidentCell {
   cell?: Cell;
 }
 
-const TIME_PRESETS = {
-  noon: new THREE.Color(1, 1, 1),
-  golden: new THREE.Color(1.1, 0.94, 0.8),
-  blue: new THREE.Color(0.8, 0.9, 1.12),
-  night: new THREE.Color(0.5, 0.56, 0.82),
-} as const;
-type TimePreset = keyof typeof TIME_PRESETS;
-const TIME_ORDER: TimePreset[] = ['noon', 'golden', 'blue', 'night'];
 const RIG_ORDER: RigMode[] = ['actor', 'director', 'producer'];
 const EYE_HEIGHT = 1.62;
 /** Lowrider camera target: "feet" sit this far below the chassis centre; the driver's eye this far above them. */
@@ -166,6 +161,10 @@ declare global {
     }) => Promise<{ bytes: number; mime: string; codec: string; ext: string; frames: number; seconds: number; manifest: unknown }>;
     /** QA: put the player's feet somewhere (the streaming harness walks the level this way). */
     __coastTeleport?: (x: number, y: number, z: number) => boolean;
+    /** QA: the canvas as a PNG data URL right after the next rendered frame (the screenshot harness). */
+    __coastShot?: () => Promise<string>;
+    /** QA: draw calls in the last rendered frame (the splats count as one — 0 of them means Spark drew nothing yet). */
+    __coastDraws?: number;
     __coastCells?: {
       active: string;
       resident: string[];
@@ -235,7 +234,9 @@ export class Game {
   private cellId: string | null = null;
   private loading = '';
   private usingFallback = false;
-  private timePreset: TimePreset = 'noon';
+  private timePreset: TimeOfDay = 'noon';
+  /** Time of day + weather as a grade on the splats, the sky, the lights and the fog (W-5). */
+  private readonly atmosphere: Atmosphere;
 
   private physics: PhysicsWorld | null = null;
   private character: CharacterController | null = null;
@@ -291,6 +292,8 @@ export class Game {
   private pttWasHeld = false;
   /** A cut is rendering: the live loop is paused (see `exportScene`). */
   private exporting = false;
+  /** Pending `__coastShot` callers: served with the canvas right after the next frame's render. */
+  private readonly shotRequests: ((png: string) => void)[] = [];
   /** The scene surface the director acts on (shared by the typed console and the Realtime client). */
   private ops: SceneOps | null = null;
   /** The OpenAI Realtime voice director (DIR-1), when `?voice=realtime` and the Worker can mint a secret. */
@@ -330,6 +333,7 @@ export class Game {
     this.scene.add(this.spark, this.world, this.localFrame);
     performance.mark('coast:boot');
     window.__coastGame = this; // harness / console handle (read-only by convention)
+    window.__coastShot = () => new Promise((resolve) => this.shotRequests.push(resolve));
     window.__coastTeleport = (x, y, z) => {
       if (!this.character) return false;
       this.exitVehicle();
@@ -338,11 +342,17 @@ export class Game {
       return true;
     };
 
-    // Lights for meshes (splats are unlit); env map from the cell pano lands with M2 (W-5).
-    this.scene.add(new THREE.HemisphereLight(0xfff1dc, 0x24303f, 1.1));
-    const sun = new THREE.DirectionalLight(0xffe2b8, 1.4);
-    sun.position.set(6, 12, 4);
-    this.scene.add(sun);
+    // Time of day is a grade (W-5): the sky dome, the sun + hemisphere for the meshes, exp² fog, and a dyno colour
+    // modifier on every splat (splats carry baked light). The env map from the cell pano lands with M2.
+    // `?grade=0` (or a tier with no post budget) keeps the flat look: no sky dome, no per-splat modifier.
+    this.atmosphere = new Atmosphere(this.scene, {
+      enabled: params.get('grade') === '1' || (params.get('grade') !== '0' && this.budgets.postProcessing !== 'none'),
+    });
+    const timeParam = params.get('time');
+    if (timeParam && (TIME_ORDER as string[]).includes(timeParam)) {
+      this.timePreset = timeParam as TimeOfDay;
+      this.atmosphere.setTime(this.timePreset, true);
+    }
 
     // Placeholder player (visible in director/producer): capsule + nose to show facing. Replaced by the $COAST rig in M4.
     this.playerMesh = new THREE.Group();
@@ -489,9 +499,9 @@ export class Game {
     return a ? groundHeightAt(a, x, z) : 0;
   }
 
-  /** Time of day is a grade on every resident splat (W-5 placeholder). */
-  private recolorWorld(preset: TimePreset = this.timePreset) {
-    for (const c of this.cells.values()) c.mesh.recolor.copy(TIME_PRESETS[preset]);
+  /** Time of day is a grade on the whole set (W-5): the splats, the sky, the lights and the fog dissolve together. */
+  private recolorWorld(preset: TimeOfDay = this.timePreset) {
+    this.atmosphere.setTime(preset, this.isShot);
   }
 
   /** Boot: pick the level / scene / cell from params and start the loop. */
@@ -673,7 +683,7 @@ export class Game {
     mesh.quaternion.set(1, 0, 0, 0); // Spark sample assets are stored Y-down: rotate 180° about X — rotate, never mirror (W-2)
     mesh.position.set(...def.position);
     mesh.scale.setScalar(def.scale);
-    mesh.recolor.copy(TIME_PRESETS[this.timePreset]);
+    this.atmosphere.grade(mesh);
     this.world.add(mesh);
     const resident: ResidentCell = {
       id,
@@ -776,7 +786,7 @@ export class Game {
         const back = graph.portal(exit.to, exit.from)!;
         const a = this.doorwayFloor(exit);
         const b = this.doorwayFloor(back);
-        const fogColor = this.scene.background instanceof THREE.Color ? this.scene.background : 0xb9c4d2;
+        const fogColor = this.atmosphere.fogColorHex;
         this.corridors.set(key, new Corridor(corridorFrame(a, b, 6, 1), { a: exit.from, b: exit.to }, this.world, physics, { fogColor }));
         for (const c of this.cells.values()) if (c.ground) this.recutCell(c, physics);
       }
@@ -797,7 +807,7 @@ export class Game {
       const back = graph.portal(road.ends.b, road.ends.a);
       if (!exit || !back) continue;
       road.dispose();
-      const fogColor = this.scene.background instanceof THREE.Color ? this.scene.background : 0xb9c4d2;
+      const fogColor = this.atmosphere.fogColorHex;
       this.corridors.set(
         key,
         new Corridor(corridorFrame(this.doorwayFloor(exit), this.doorwayFloor(back), 6, 1), road.ends, this.world, physics, { fogColor }),
@@ -1380,6 +1390,7 @@ export class Game {
         this.playerMesh.visible = false;
         this.props?.select(null);
       },
+      frame: () => this.atmosphere.frame(this.camera),
       end: () => {
         this.exporting = false;
         this.last = performance.now();
@@ -1440,6 +1451,8 @@ export class Game {
       }
     }
 
+    this.atmosphere.update(dt, this.camera);
+    if (this.atmosphere.tweening) for (const road of this.corridors.values()) road.setFogColor(this.atmosphere.fogColorHex);
     if (this.isShot) {
       if (this.splat) this.splat.rotation.y = this.freezeT * 0.5; // deterministic pose for screenshots
     } else {
@@ -1454,6 +1467,12 @@ export class Game {
     }
 
     this.renderer.render(this.scene, this.camera);
+    window.__coastDraws = this.renderer.info.render.calls;
+    if (this.shotRequests.length) {
+      this.renderer.getContext().finish(); // software GL: make sure the instanced splat draw has landed before reading back
+      const png = this.renderer.domElement.toDataURL('image/png');
+      for (const r of this.shotRequests.splice(0)) r(png);
+    }
     this.studio?.frameRendered();
     this.perf.tick(dtMs);
     if (this.frame++ % 10 === 0) this.renderHud();
@@ -2304,14 +2323,16 @@ export class Game {
         return spec.id;
       },
       setTime: (preset) => {
-        const map: Record<string, TimePreset> = { golden: 'golden', blue: 'blue', night: 'night', fog_noon: 'noon' };
-        const t = map[preset];
-        if (!t) return false;
-        this.timePreset = t;
-        this.recolorWorld(t);
+        if (!(TIME_ORDER as string[]).includes(preset)) return false;
+        this.timePreset = preset as TimeOfDay;
+        this.recolorWorld(this.timePreset);
         return true;
       },
-      setWeather: () => false, // fog volumes / rain land with the Marble cells (M2, W-5)
+      setWeather: (kind, amount) => {
+        // Fog and rain are density on the same atmosphere (rain has no drops yet — it reads as a wet haze, W-5).
+        this.atmosphere.setWeather(kind, amount ?? 0.6);
+        return true;
+      },
       possess: (id) => {
         if (!this.npcs) return false;
         if (id === 'me') {
